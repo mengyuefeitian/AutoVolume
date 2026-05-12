@@ -4,6 +4,7 @@ import XCTest
 final class ConfigStoreTests: XCTestCase {
     func testSaveAndLoadVolumes() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let store = JSONConfigStore(directory: directory)
         let volume = VolumeConfig(
             name: "NAS",
@@ -24,6 +25,7 @@ final class ConfigStoreTests: XCTestCase {
 
     func testLoadReturnsEmptyArrayWhenConfigDoesNotExist() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let store = JSONConfigStore(directory: directory)
 
         XCTAssertEqual(try store.load(), [])
