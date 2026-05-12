@@ -27,6 +27,7 @@ struct AppStrings {
     let unmount: String
     let test: String
     let saveAndMount: String
+    let save: String
     let cancel: String
     let name: String
     let server: String
@@ -44,6 +45,10 @@ struct AppStrings {
     let language: String
     let showPassword: String
     let hidePassword: String
+    let testReachabilitySucceeded: String
+    let smbDialect: String
+    let smbMultichannel: String
+    let smbAsyncReads: String
 
     static func values(for language: AppLanguage) -> AppStrings {
         switch language {
@@ -59,6 +64,7 @@ struct AppStrings {
                 unmount: "Unmount",
                 test: "Test",
                 saveAndMount: "Save & Mount",
+                save: "Save",
                 cancel: "Cancel",
                 name: "Name",
                 server: "Server",
@@ -75,7 +81,11 @@ struct AppStrings {
                 confirmRemove: "Remove this volume?",
                 language: "Language",
                 showPassword: "Show password",
-                hidePassword: "Hide password"
+                hidePassword: "Hide password",
+                testReachabilitySucceeded: "Server is reachable. Credentials are verified during mount.",
+                smbDialect: "SMB Mode",
+                smbMultichannel: "SMB3 Multichannel",
+                smbAsyncReads: "Async directory reads"
             )
         case .chinese:
             AppStrings(
@@ -89,6 +99,7 @@ struct AppStrings {
                 unmount: "卸载",
                 test: "测试",
                 saveAndMount: "保存并挂载",
+                save: "保存",
                 cancel: "取消",
                 name: "名称",
                 server: "服务器",
@@ -105,7 +116,11 @@ struct AppStrings {
                 confirmRemove: "移除此网络卷？",
                 language: "语言",
                 showPassword: "显示密码",
-                hidePassword: "隐藏密码"
+                hidePassword: "隐藏密码",
+                testReachabilitySucceeded: "服务器可达。账号密码会在挂载时验证。",
+                smbDialect: "SMB 模式",
+                smbMultichannel: "SMB3 多通道",
+                smbAsyncReads: "异步目录读取"
             )
         }
     }
@@ -128,6 +143,7 @@ public final class AppViewModel {
     private let commandRunner: CommandRunner
     private let mountPlanner: MountPlanner
     private let connectivityTester: ConnectivityTester
+    private let smbPreferencesWriter: SMBPreferencesWriter
 
     private static let languageDefaultsKey = "AutoVolume.language"
 
@@ -136,13 +152,15 @@ public final class AppViewModel {
         credentialStore: CredentialStore = KeychainCredentialStore(),
         commandRunner: CommandRunner = ProcessCommandRunner(),
         mountPlanner: MountPlanner = MountPlanner(),
-        connectivityTester: ConnectivityTester = ConnectivityTester()
+        connectivityTester: ConnectivityTester = ConnectivityTester(),
+        smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
         self.commandRunner = commandRunner
         self.mountPlanner = mountPlanner
         self.connectivityTester = connectivityTester
+        self.smbPreferencesWriter = smbPreferencesWriter
         self.volumes = (try? configStore.load()) ?? []
         if let rawLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey),
            let savedLanguage = AppLanguage(rawValue: rawLanguage) {
@@ -167,11 +185,19 @@ public final class AppViewModel {
         editorSessionID = UUID()
     }
 
+    public func password(for config: VolumeConfig?) -> String {
+        guard let config else { return "" }
+        return (try? credentialStore.password(for: config.id)) ?? ""
+    }
+
     public func add(_ config: VolumeConfig, password: String?) throws {
         volumes.append(config)
         try persist()
         if let password, !password.isEmpty {
             try credentialStore.savePassword(password, for: config.id)
+        }
+        if config.protocolType == .smb {
+            try smbPreferencesWriter.apply(options: config.smbOptions)
         }
     }
 
@@ -198,11 +224,14 @@ public final class AppViewModel {
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
-        return strings.testSucceeded
+        return config.protocolType == .webdav ? strings.testSucceeded : strings.testReachabilitySucceeded
     }
 
     public func mount(_ config: VolumeConfig, password: String? = nil) throws -> String {
         let storedPassword = try password ?? credentialStore.password(for: config.id)
+        if config.protocolType == .smb {
+            try smbPreferencesWriter.apply(options: config.smbOptions)
+        }
         try runMountCommand(for: config, password: storedPassword)
         return strings.mountSucceeded
     }

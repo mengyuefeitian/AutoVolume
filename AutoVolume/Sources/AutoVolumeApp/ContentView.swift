@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AutoVolumeShared
 
 struct ContentView: View {
@@ -22,6 +23,7 @@ struct ContentView: View {
                 Button {
                     viewModel.beginAddingVolume()
                     openWindow(id: "volume-editor")
+                    bringEditorForward()
                 } label: {
                     Label(viewModel.strings.add, systemImage: "plus")
                 }
@@ -57,6 +59,7 @@ struct ContentView: View {
                         Button {
                             viewModel.beginEditing(volume)
                             openWindow(id: "volume-editor")
+                            bringEditorForward()
                         } label: {
                             Image(systemName: "pencil")
                         }
@@ -89,5 +92,12 @@ struct ContentView: View {
         }
         .padding(22)
         .background(.regularMaterial)
+    }
+
+    private func bringEditorForward() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first { $0.identifier?.rawValue == "volume-editor" }?.makeKeyAndOrderFront(nil)
+        }
     }
 }

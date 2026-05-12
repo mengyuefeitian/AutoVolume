@@ -3,10 +3,12 @@ import Foundation
 public struct CommandPlan: Equatable {
     public var executable: String
     public var arguments: [String]
+    public var standardInput: String?
 
-    public init(executable: String, arguments: [String]) {
+    public init(executable: String, arguments: [String], standardInput: String? = nil) {
         self.executable = executable
         self.arguments = arguments
+        self.standardInput = standardInput
     }
 }
 
@@ -33,11 +35,19 @@ public final class ProcessCommandRunner: CommandRunner {
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()
+        let stdin = Pipe()
         process.executableURL = URL(fileURLWithPath: plan.executable)
         process.arguments = plan.arguments
         process.standardOutput = stdout
         process.standardError = stderr
+        if plan.standardInput != nil {
+            process.standardInput = stdin
+        }
         try process.run()
+        if let standardInput = plan.standardInput {
+            stdin.fileHandleForWriting.write(Data(standardInput.utf8))
+            try? stdin.fileHandleForWriting.close()
+        }
         process.waitUntilExit()
         return CommandResult(
             exitCode: process.terminationStatus,

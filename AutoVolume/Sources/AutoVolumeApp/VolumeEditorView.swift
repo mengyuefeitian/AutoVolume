@@ -15,6 +15,9 @@ struct VolumeEditorView: View {
     @State private var password = ""
     @State private var mountPoint = Self.defaultMountRoot
     @State private var intervalMinutes = 5.0
+    @State private var smbDialect = SMBDialect.smb3
+    @State private var isSMBMultichannelEnabled = true
+    @State private var smbAsyncDirectoryQueryCount = 10.0
     @State private var message: String?
     @State private var isPasswordVisible = false
     @Environment(\.dismissWindow) private var dismissWindow
@@ -34,8 +37,12 @@ struct VolumeEditorView: View {
         _server = State(initialValue: volume?.server ?? "")
         _remotePath = State(initialValue: volume?.remotePath ?? "")
         _username = State(initialValue: volume?.username ?? "")
+        _password = State(initialValue: viewModel.password(for: volume))
         _mountPoint = State(initialValue: volume?.mountPoint ?? Self.defaultMountRoot)
         _intervalMinutes = State(initialValue: max(1, (volume?.checkIntervalSeconds ?? 300) / 60))
+        _smbDialect = State(initialValue: volume?.smbOptions.dialect ?? .smb3)
+        _isSMBMultichannelEnabled = State(initialValue: volume?.smbOptions.isMultichannelEnabled ?? true)
+        _smbAsyncDirectoryQueryCount = State(initialValue: Double(volume?.smbOptions.asyncDirectoryQueryCount ?? 10))
     }
 
     var body: some View {
@@ -94,6 +101,30 @@ struct VolumeEditorView: View {
             Text(viewModel.strings.everyMinutes(Int(intervalMinutes)))
                 .foregroundStyle(.secondary)
 
+            if protocolType == .smb {
+                Divider()
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                    GridRow {
+                        Text(viewModel.strings.smbDialect)
+                        Picker(viewModel.strings.smbDialect, selection: $smbDialect) {
+                            ForEach(SMBDialect.allCases) { dialect in
+                                Text(dialect.displayName).tag(dialect)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+                    GridRow {
+                        Text(viewModel.strings.smbMultichannel)
+                        Toggle("", isOn: $isSMBMultichannelEnabled)
+                            .labelsHidden()
+                    }
+                    GridRow {
+                        Text(viewModel.strings.smbAsyncReads)
+                        Stepper("\(Int(smbAsyncDirectoryQueryCount))", value: $smbAsyncDirectoryQueryCount, in: 1...64, step: 1)
+                    }
+                }
+            }
+
             if let message {
                 Text(message)
                     .font(.footnote)
@@ -113,12 +144,25 @@ struct VolumeEditorView: View {
                         message = error.localizedDescription
                     }
                 }
+                Button(viewModel.strings.save) {
+                    do {
+                        try viewModel.save(makeConfig(), password: password.isEmpty ? nil : password)
+                        onSaved(viewModel.strings.saved)
+                        dismissWindow(id: "volume-editor")
+                    } catch {
+                        message = error.localizedDescription
+                    }
+                }
                 Button(viewModel.strings.saveAndMount) {
                     do {
                         let config = makeConfig()
                         try viewModel.save(config, password: password.isEmpty ? nil : password)
-                        let result = try viewModel.mount(config, password: password.isEmpty ? nil : password)
-                        onSaved(result)
+                        do {
+                            let result = try viewModel.mount(config, password: password.isEmpty ? nil : password)
+                            onSaved(result)
+                        } catch {
+                            onSaved("\(viewModel.strings.saved) \(error.localizedDescription)")
+                        }
                         dismissWindow(id: "volume-editor")
                     } catch {
                         message = error.localizedDescription
@@ -140,7 +184,12 @@ struct VolumeEditorView: View {
             username: username.isEmpty ? nil : username,
             mountPoint: mountPoint,
             checkIntervalSeconds: intervalMinutes * 60,
-            isEnabled: true
+            isEnabled: true,
+            smbOptions: SMBOptions(
+                dialect: smbDialect,
+                isMultichannelEnabled: isSMBMultichannelEnabled,
+                asyncDirectoryQueryCount: Int(smbAsyncDirectoryQueryCount)
+            )
         )
     }
 

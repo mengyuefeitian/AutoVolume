@@ -76,7 +76,9 @@ func testInMemoryCredentialStore() throws {
 func testMountPlanning() throws {
     let smb = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
     let smbPlan = try MountPlanner().mountPlan(for: smb, password: "secret")
-    try expect(smbPlan == CommandPlan(executable: "/usr/bin/open", arguments: ["smb://mei@nas.local/team"]), "SMB mount plan mismatch")
+    try expect(smbPlan.executable == "/usr/bin/osascript", "SMB mount should use AppleScript")
+    try expect(smbPlan.arguments == ["-"], "SMB mount should pass AppleScript through stdin")
+    try expect(smbPlan.standardInput?.contains("smb://nas.local/team") == true, "SMB mount script missing URL")
 
     let nfs = VolumeConfig(name: "Exports", protocolType: .nfs, server: "nas.local", remotePath: "/exports/team", username: nil, mountPoint: "/Volumes/Exports", checkIntervalSeconds: 60, isEnabled: true)
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)
@@ -84,7 +86,8 @@ func testMountPlanning() throws {
 
     let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "dav.example.com", remotePath: "remote.php/dav/files/mei", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 60, isEnabled: true)
     let webdavPlan = try MountPlanner().mountPlan(for: webdav, password: "secret")
-    try expect(webdavPlan == CommandPlan(executable: "/sbin/mount_webdav", arguments: ["https://mei@dav.example.com/remote.php/dav/files/mei", "/Volumes/DAV"]), "WebDAV mount plan mismatch")
+    try expect(webdavPlan.executable == "/usr/bin/osascript", "WebDAV mount should use AppleScript")
+    try expect(webdavPlan.standardInput?.contains("https://dav.example.com/remote.php/dav/files/mei") == true, "WebDAV mount script missing URL")
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
@@ -123,7 +126,7 @@ func testAgentEngineDecisions() throws {
     let unmountedEngine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: credentials, commandRunner: unmountedRunner, mountPlanner: MountPlanner())
     let unmountedStatus = try unmountedEngine.check(unmounted)
     try expect(unmountedStatus == .mounted, "Unmounted volume should mount successfully")
-    try expect(unmountedRunner.plans.first?.executable == "/usr/bin/open", "Unmounted volume should run open")
+    try expect(unmountedRunner.plans.first?.executable == "/usr/bin/osascript", "Unmounted volume should use macOS mount volume")
 }
 
 func testCheckScheduler() throws {

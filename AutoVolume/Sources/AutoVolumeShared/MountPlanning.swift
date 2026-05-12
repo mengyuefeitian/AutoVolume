@@ -10,11 +10,11 @@ public struct MountPlanner {
     public func mountPlan(for config: VolumeConfig, password: String?) throws -> CommandPlan {
         switch config.protocolType {
         case .smb:
-            return CommandPlan(executable: "/usr/bin/open", arguments: [try urlString(scheme: "smb", config: config)])
+            return try appleScriptMountPlan(url: urlString(scheme: "smb", config: config, includeUser: false), username: config.username, password: password)
         case .webdav:
-            return CommandPlan(executable: "/sbin/mount_webdav", arguments: [try webDAVURLString(config: config), config.mountPoint])
+            return try appleScriptMountPlan(url: webDAVURLString(config: config, includeUser: false), username: config.username, password: password)
         case .afp:
-            return CommandPlan(executable: "/usr/bin/open", arguments: [try urlString(scheme: "afp", config: config)])
+            return try appleScriptMountPlan(url: urlString(scheme: "afp", config: config, includeUser: false), username: config.username, password: password)
         case .nfs:
             return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["\(config.server):\(config.remotePath)", config.mountPoint])
         }
@@ -24,19 +24,19 @@ public struct MountPlanner {
         CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", mountPoint])
     }
 
-    private func urlString(scheme: String, config: VolumeConfig) throws -> String {
+    private func urlString(scheme: String, config: VolumeConfig, includeUser: Bool = true) throws -> String {
         var components = URLComponents()
         components.scheme = scheme
         components.host = config.server
         components.path = "/" + config.remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if let username = config.username, !username.isEmpty {
+        if includeUser, let username = config.username, !username.isEmpty {
             components.user = username
         }
         guard let value = components.url?.absoluteString else { throw MountPlanningError.invalidURL }
         return value
     }
 
-    private func webDAVURLString(config: VolumeConfig) throws -> String {
+    private func webDAVURLString(config: VolumeConfig, includeUser: Bool = true) throws -> String {
         let rawServer = config.server.trimmingCharacters(in: .whitespacesAndNewlines)
         let serverWithScheme = rawServer.contains("://") ? rawServer : "https://\(rawServer)"
         guard var components = URLComponents(string: serverWithScheme) else {
@@ -46,10 +46,35 @@ public struct MountPlanner {
         let remotePath = config.remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let combinedPath = [basePath, remotePath].filter { !$0.isEmpty }.joined(separator: "/")
         components.path = combinedPath.isEmpty ? "" : "/\(combinedPath)"
-        if let username = config.username, !username.isEmpty {
+        if includeUser, let username = config.username, !username.isEmpty {
             components.user = username
         }
         guard let value = components.url?.absoluteString else { throw MountPlanningError.invalidURL }
         return value
+    }
+
+    private func appleScriptMountPlan(url: String, username: String?, password: String?) throws -> CommandPlan {
+        let escapedURL = appleScriptEscaped(url)
+        let script: String
+        if let username, !username.isEmpty, let password, !password.isEmpty {
+            script = """
+            mount volume "\(escapedURL)" as user name "\(appleScriptEscaped(username))" with password "\(appleScriptEscaped(password))"
+            """
+        } else if let username, !username.isEmpty {
+            script = """
+            mount volume "\(escapedURL)" as user name "\(appleScriptEscaped(username))"
+            """
+        } else {
+            script = """
+            mount volume "\(escapedURL)"
+            """
+        }
+        return CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script)
+    }
+
+    private func appleScriptEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
