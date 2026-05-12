@@ -8,19 +8,25 @@ let engine = AgentEngine(
     commandRunner: ProcessCommandRunner(),
     mountPlanner: MountPlanner()
 )
+var scheduler = CheckScheduler()
 
 func runOnce() {
     do {
         let configs = try store.load()
+        let now = Date()
         for config in configs where config.isEnabled {
+            guard scheduler.isDue(volumeID: config.id, interval: config.checkIntervalSeconds, now: now) else {
+                continue
+            }
             _ = try engine.check(config)
+            scheduler.markChecked(volumeID: config.id, at: now)
         }
     } catch {
         fputs("AutoVolumeAgent error: \(error)\n", stderr)
     }
 }
 
-let timer = Timer(timeInterval: 60, repeats: true) { _ in
+let timer = Timer(timeInterval: 15, repeats: true) { _ in
     runOnce()
 }
 

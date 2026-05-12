@@ -1,8 +1,9 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 5.10
 import PackageDescription
 
 let package = Package(
     name: "AutoVolume",
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "AutoVolumeShared", targets: ["AutoVolumeShared"]),
         .executable(name: "AutoVolumeAgent", targets: ["AutoVolumeAgent"]),
