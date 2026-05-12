@@ -12,7 +12,7 @@ public struct MountPlanner {
         case .smb:
             return CommandPlan(executable: "/usr/bin/open", arguments: [try urlString(scheme: "smb", config: config)])
         case .webdav:
-            return CommandPlan(executable: "/usr/bin/open", arguments: [try urlString(scheme: "webdav", config: config)])
+            return CommandPlan(executable: "/sbin/mount_webdav", arguments: [try webDAVURLString(config: config), config.mountPoint])
         case .afp:
             return CommandPlan(executable: "/usr/bin/open", arguments: [try urlString(scheme: "afp", config: config)])
         case .nfs:
@@ -29,6 +29,23 @@ public struct MountPlanner {
         components.scheme = scheme
         components.host = config.server
         components.path = "/" + config.remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if let username = config.username, !username.isEmpty {
+            components.user = username
+        }
+        guard let value = components.url?.absoluteString else { throw MountPlanningError.invalidURL }
+        return value
+    }
+
+    private func webDAVURLString(config: VolumeConfig) throws -> String {
+        let rawServer = config.server.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serverWithScheme = rawServer.contains("://") ? rawServer : "https://\(rawServer)"
+        guard var components = URLComponents(string: serverWithScheme) else {
+            throw MountPlanningError.invalidURL
+        }
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let remotePath = config.remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let combinedPath = [basePath, remotePath].filter { !$0.isEmpty }.joined(separator: "/")
+        components.path = combinedPath.isEmpty ? "" : "/\(combinedPath)"
         if let username = config.username, !username.isEmpty {
             components.user = username
         }

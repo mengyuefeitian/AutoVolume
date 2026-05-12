@@ -82,17 +82,23 @@ func testMountPlanning() throws {
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)
     try expect(nfsPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["nas.local:/exports/team", "/Volumes/Exports"]), "NFS mount plan mismatch")
 
+    let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "dav.example.com", remotePath: "remote.php/dav/files/mei", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 60, isEnabled: true)
+    let webdavPlan = try MountPlanner().mountPlan(for: webdav, password: "secret")
+    try expect(webdavPlan == CommandPlan(executable: "/sbin/mount_webdav", arguments: ["https://mei@dav.example.com/remote.php/dav/files/mei", "/Volumes/DAV"]), "WebDAV mount plan mismatch")
+
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
 }
 
 func testAgentEngineDecisions() throws {
-    let disabled = VolumeConfig(name: "Off", protocolType: .smb, server: "nas.local", remotePath: "off", username: nil, mountPoint: "/Volumes/Off", checkIntervalSeconds: 60, isEnabled: false)
+    let testMountRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: testMountRoot) }
+    let disabled = VolumeConfig(name: "Off", protocolType: .smb, server: "nas.local", remotePath: "off", username: nil, mountPoint: testMountRoot.appendingPathComponent("Off").path, checkIntervalSeconds: 60, isEnabled: false)
     let disabledEngine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: InMemoryCredentialStore(), commandRunner: RecordingCommandRunner(), mountPlanner: MountPlanner())
     let disabledStatus = try disabledEngine.check(disabled)
     try expect(disabledStatus == .unmounted, "Disabled volume should be skipped")
 
-    let mounted = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: nil, mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
+    let mounted = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: nil, mountPoint: testMountRoot.appendingPathComponent("Mounted").path, checkIntervalSeconds: 60, isEnabled: true)
     let mountedRunner = RecordingCommandRunner()
     let mountedEngine = AgentEngine(mountState: FakeMountStateProvider(isMounted: true), credentialStore: InMemoryCredentialStore(), commandRunner: mountedRunner, mountPlanner: MountPlanner())
     let mountedStatus = try mountedEngine.check(mounted)
@@ -100,7 +106,7 @@ func testAgentEngineDecisions() throws {
     try expect(mountedRunner.plans.isEmpty, "Mounted volume should not run a command")
 
     let id = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
-    let unmounted = VolumeConfig(id: id, name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
+    let unmounted = VolumeConfig(id: id, name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: testMountRoot.appendingPathComponent("Unmounted").path, checkIntervalSeconds: 60, isEnabled: true)
     let credentials = InMemoryCredentialStore()
     try credentials.savePassword("secret", for: id)
     let unmountedRunner = RecordingCommandRunner(result: CommandResult(exitCode: 0, stdout: "", stderr: ""))

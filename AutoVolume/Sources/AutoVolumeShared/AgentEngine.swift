@@ -23,6 +23,10 @@ public final class AgentEngine {
         if mountState.isMounted(config: config) { return .mounted }
 
         let password = try credentialStore.password(for: config.id)
+        try FileManager.default.createDirectory(
+            at: URL(fileURLWithPath: config.mountPoint),
+            withIntermediateDirectories: true
+        )
         let result = try commandRunner.run(try mountPlanner.mountPlan(for: config, password: password))
         if result.exitCode == 0 {
             return .mounted
