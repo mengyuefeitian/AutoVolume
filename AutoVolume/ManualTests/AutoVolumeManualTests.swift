@@ -90,6 +90,16 @@ func testMountPlanning() throws {
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
 }
 
+func testConnectivityPlanning() throws {
+    let smb = VolumeConfig(name: "Team", protocolType: .smb, server: "smb://nas.local/team", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
+    let smbPlan = try ConnectivityTester().testPlan(for: smb, password: "secret")
+    try expect(smbPlan == CommandPlan(executable: "/usr/bin/nc", arguments: ["-z", "-G", "5", "nas.local", "445"]), "SMB connectivity plan mismatch")
+
+    let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "https://dav.example.com", remotePath: "remote.php/dav/files/mei", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 60, isEnabled: true)
+    let webdavPlan = try ConnectivityTester().testPlan(for: webdav, password: "secret")
+    try expect(webdavPlan == CommandPlan(executable: "/usr/bin/curl", arguments: ["--user", "mei:secret", "--head", "--location", "--max-time", "10", "https://dav.example.com/remote.php/dav/files/mei"]), "WebDAV connectivity plan mismatch")
+}
+
 func testAgentEngineDecisions() throws {
     let testMountRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: testMountRoot) }
@@ -150,6 +160,7 @@ let tests: [(String, () throws -> Void)] = [
     ("ConfigStore save/load", testConfigStoreSaveLoadAndMissingFile),
     ("InMemoryCredentialStore", testInMemoryCredentialStore),
     ("MountPlanning", testMountPlanning),
+    ("ConnectivityPlanning", testConnectivityPlanning),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("CheckScheduler", testCheckScheduler)
 ]

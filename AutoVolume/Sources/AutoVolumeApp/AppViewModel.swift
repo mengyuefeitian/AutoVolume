@@ -33,6 +33,7 @@ struct AppStrings {
     let remotePath: String
     let username: String
     let password: String
+    let protocolLabel: String
     let mountPoint: String
     let checkInterval: String
     let everyMinutes: (Int) -> String
@@ -41,6 +42,8 @@ struct AppStrings {
     let saved: String
     let confirmRemove: String
     let language: String
+    let showPassword: String
+    let hidePassword: String
 
     static func values(for language: AppLanguage) -> AppStrings {
         switch language {
@@ -62,6 +65,7 @@ struct AppStrings {
                 remotePath: "Remote Path",
                 username: "Username",
                 password: "Password",
+                protocolLabel: "Protocol",
                 mountPoint: "Mount Point",
                 checkInterval: "Check Interval",
                 everyMinutes: { "Every \($0) minutes" },
@@ -69,7 +73,9 @@ struct AppStrings {
                 mountSucceeded: "Mount command succeeded.",
                 saved: "Saved.",
                 confirmRemove: "Remove this volume?",
-                language: "Language"
+                language: "Language",
+                showPassword: "Show password",
+                hidePassword: "Hide password"
             )
         case .chinese:
             AppStrings(
@@ -89,6 +95,7 @@ struct AppStrings {
                 remotePath: "远程路径",
                 username: "用户名",
                 password: "密码",
+                protocolLabel: "协议",
                 mountPoint: "挂载点",
                 checkInterval: "检查间隔",
                 everyMinutes: { "每 \($0) 分钟" },
@@ -96,7 +103,9 @@ struct AppStrings {
                 mountSucceeded: "挂载命令执行成功。",
                 saved: "已保存。",
                 confirmRemove: "移除此网络卷？",
-                language: "语言"
+                language: "语言",
+                showPassword: "显示密码",
+                hidePassword: "隐藏密码"
             )
         }
     }
@@ -106,6 +115,8 @@ struct AppStrings {
 public final class AppViewModel {
     public private(set) var volumes: [VolumeConfig] = []
     public var selectedVolumeID: VolumeConfig.ID?
+    public var editorVolume: VolumeConfig?
+    public var editorSessionID = UUID()
     public var language: AppLanguage {
         didSet {
             UserDefaults.standard.set(language.rawValue, forKey: Self.languageDefaultsKey)
@@ -116,6 +127,7 @@ public final class AppViewModel {
     private let credentialStore: CredentialStore
     private let commandRunner: CommandRunner
     private let mountPlanner: MountPlanner
+    private let connectivityTester: ConnectivityTester
 
     private static let languageDefaultsKey = "AutoVolume.language"
 
@@ -123,12 +135,14 @@ public final class AppViewModel {
         configStore: ConfigStore = JSONConfigStore(),
         credentialStore: CredentialStore = KeychainCredentialStore(),
         commandRunner: CommandRunner = ProcessCommandRunner(),
-        mountPlanner: MountPlanner = MountPlanner()
+        mountPlanner: MountPlanner = MountPlanner(),
+        connectivityTester: ConnectivityTester = ConnectivityTester()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
         self.commandRunner = commandRunner
         self.mountPlanner = mountPlanner
+        self.connectivityTester = connectivityTester
         self.volumes = (try? configStore.load()) ?? []
         if let rawLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey),
            let savedLanguage = AppLanguage(rawValue: rawLanguage) {
@@ -142,6 +156,16 @@ public final class AppViewModel {
 
     var strings: AppStrings { AppStrings.values(for: language) }
     var productName: String { strings.productName }
+
+    public func beginAddingVolume() {
+        editorVolume = nil
+        editorSessionID = UUID()
+    }
+
+    public func beginEditing(_ config: VolumeConfig) {
+        editorVolume = config
+        editorSessionID = UUID()
+    }
 
     public func add(_ config: VolumeConfig, password: String?) throws {
         volumes.append(config)
@@ -170,7 +194,10 @@ public final class AppViewModel {
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
-        try runMountCommand(for: config, password: password)
+        let result = try commandRunner.run(try connectivityTester.testPlan(for: config, password: password))
+        guard result.exitCode == 0 else {
+            throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
         return strings.testSucceeded
     }
 

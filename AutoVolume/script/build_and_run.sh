@@ -27,7 +27,8 @@ swiftc \
   Sources/AutoVolumeShared/MountPlanning.swift \
   Sources/AutoVolumeShared/MountState.swift \
   Sources/AutoVolumeShared/AgentEngine.swift \
-  Sources/AutoVolumeShared/CheckScheduler.swift
+  Sources/AutoVolumeShared/CheckScheduler.swift \
+  Sources/AutoVolumeShared/ConnectivityTesting.swift
 
 swiftc \
   -I "$BUILD/shared" \

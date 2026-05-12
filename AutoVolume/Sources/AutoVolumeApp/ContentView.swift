@@ -3,9 +3,8 @@ import AutoVolumeShared
 
 struct ContentView: View {
     @Bindable var viewModel: AppViewModel
-    @State private var editorVolume: VolumeConfig?
-    @State private var isShowingEditor = false
     @State private var message: String?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -21,29 +20,15 @@ struct ContentView: View {
                 .labelsHidden()
                 .frame(width: 92)
                 Button {
-                    editorVolume = nil
-                    isShowingEditor = true
+                    viewModel.beginAddingVolume()
+                    openWindow(id: "volume-editor")
                 } label: {
                     Label(viewModel.strings.add, systemImage: "plus")
                 }
                 .keyboardShortcut("n")
             }
 
-            if isShowingEditor {
-                VolumeEditorView(
-                    viewModel: viewModel,
-                    volume: editorVolume,
-                    onCancel: {
-                        isShowingEditor = false
-                        editorVolume = nil
-                    },
-                    onSaved: { text in
-                        message = text
-                        isShowingEditor = false
-                        editorVolume = nil
-                    }
-                )
-            } else if viewModel.volumes.isEmpty {
+            if viewModel.volumes.isEmpty {
                 ContentUnavailableView(viewModel.strings.emptyTitle, systemImage: "externaldrive.badge.plus", description: Text(viewModel.strings.emptyDescription))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -70,8 +55,8 @@ struct ContentView: View {
                         .buttonStyle(.borderless)
                         .help(viewModel.strings.mount)
                         Button {
-                            editorVolume = volume
-                            isShowingEditor = true
+                            viewModel.beginEditing(volume)
+                            openWindow(id: "volume-editor")
                         } label: {
                             Image(systemName: "pencil")
                         }

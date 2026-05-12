@@ -16,6 +16,8 @@ struct VolumeEditorView: View {
     @State private var mountPoint = Self.defaultMountRoot
     @State private var intervalMinutes = 5.0
     @State private var message: String?
+    @State private var isPasswordVisible = false
+    @Environment(\.dismissWindow) private var dismissWindow
 
     init(
         viewModel: AppViewModel,
@@ -44,12 +46,13 @@ struct VolumeEditorView: View {
                     TextField(viewModel.strings.name, text: $name)
                 }
                 GridRow {
-                    Text("Protocol")
-                    Picker("Protocol", selection: $protocolType) {
+                    Text(viewModel.strings.protocolLabel)
+                    Picker(viewModel.strings.protocolLabel, selection: $protocolType) {
                         ForEach(VolumeProtocol.allCases) { item in
                             Text(item.rawValue.uppercased()).tag(item)
                         }
                     }
+                    .labelsHidden()
                 }
                 GridRow {
                     Text(viewModel.strings.server)
@@ -65,7 +68,20 @@ struct VolumeEditorView: View {
                 }
                 GridRow {
                     Text(viewModel.strings.password)
-                    SecureField(viewModel.strings.password, text: $password)
+                    HStack {
+                        if isPasswordVisible {
+                            TextField(viewModel.strings.password, text: $password)
+                        } else {
+                            SecureField(viewModel.strings.password, text: $password)
+                        }
+                        Button {
+                            isPasswordVisible.toggle()
+                        } label: {
+                            Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(isPasswordVisible ? viewModel.strings.hidePassword : viewModel.strings.showPassword)
+                    }
                 }
                 GridRow {
                     Text(viewModel.strings.mountPoint)
@@ -85,7 +101,10 @@ struct VolumeEditorView: View {
             }
 
             HStack {
-                Button(viewModel.strings.cancel) { onCancel() }
+                Button(viewModel.strings.cancel) {
+                    onCancel()
+                    dismissWindow(id: "volume-editor")
+                }
                 Spacer()
                 Button(viewModel.strings.test) {
                     do {
@@ -100,6 +119,7 @@ struct VolumeEditorView: View {
                         try viewModel.save(config, password: password.isEmpty ? nil : password)
                         let result = try viewModel.mount(config, password: password.isEmpty ? nil : password)
                         onSaved(result)
+                        dismissWindow(id: "volume-editor")
                     } catch {
                         message = error.localizedDescription
                     }

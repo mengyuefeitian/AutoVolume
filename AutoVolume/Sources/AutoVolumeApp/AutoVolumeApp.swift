@@ -11,5 +11,17 @@ struct AutoVolumeApp: App {
                 .frame(width: 620, height: 520)
         }
         .menuBarExtraStyle(.window)
+
+        Window(viewModel.productName, id: "volume-editor") {
+            VolumeEditorView(
+                viewModel: viewModel,
+                volume: viewModel.editorVolume,
+                onCancel: {},
+                onSaved: { _ in }
+            )
+            .id(viewModel.editorSessionID)
+            .frame(width: 560, height: 430)
+        }
+        .defaultSize(width: 560, height: 430)
     }
 }
