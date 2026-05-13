@@ -121,6 +121,8 @@ func testMountPlanning() throws {
     try expect(quietSMBPlan.arguments.contains("nopassprompt,soft"), "Quiet SMB mount should suppress prompts and use a soft mount")
     try expect(quietSMBPlan.arguments.contains("//mei:secret@nas.local/video"), "Quiet SMB mount should mount the share only")
     try expect(MountPlanner().exposedPathTarget(for: smbNested)?.hasSuffix("/projects") == true, "Nested SMB mount should expose the subdirectory")
+    try expect(MountPlanner().browsePath(for: smbNested).hasSuffix("/projects"), "Nested SMB Finder path should open the configured subdirectory")
+    try expect(MountPlanner().browsePath(for: smb) == "/Volumes/Team", "Non-nested Finder path should open the visible mount point")
 
     let nfs = VolumeConfig(name: "Exports", protocolType: .nfs, server: "nas.local", remotePath: "/exports/team", username: nil, mountPoint: "/Volumes/Exports", checkIntervalSeconds: 60, isEnabled: true)
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)

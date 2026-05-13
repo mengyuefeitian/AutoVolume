@@ -41,29 +41,29 @@ NSColor(calibratedWhite: 1.0, alpha: 0.78).setFill()
 panel.fill()
 
 let arrow = NSBezierPath()
-arrow.lineWidth = 7
+arrow.lineWidth = 8
 arrow.lineCapStyle = .round
 arrow.lineJoinStyle = .round
-arrow.move(to: NSPoint(x: 250, y: 210))
-arrow.line(to: NSPoint(x: 390, y: 210))
-arrow.move(to: NSPoint(x: 360, y: 242))
-arrow.line(to: NSPoint(x: 392, y: 210))
-arrow.line(to: NSPoint(x: 360, y: 178))
+arrow.move(to: NSPoint(x: 244, y: 206))
+arrow.curve(to: NSPoint(x: 397, y: 206), controlPoint1: NSPoint(x: 290, y: 260), controlPoint2: NSPoint(x: 350, y: 260))
+arrow.move(to: NSPoint(x: 365, y: 238))
+arrow.line(to: NSPoint(x: 399, y: 206))
+arrow.line(to: NSPoint(x: 358, y: 184))
 NSColor(calibratedRed: 0.14, green: 0.38, blue: 0.78, alpha: 0.88).setStroke()
 arrow.stroke()
 
-let title = "拖入 Applications"
+let title = "拖入应用程序"
 let subtitle = "Drag AutoVolume into Applications"
 let titleAttributes: [NSAttributedString.Key: Any] = [
-    .font: NSFont.systemFont(ofSize: 30, weight: .bold),
+    .font: NSFont.systemFont(ofSize: 28, weight: .bold),
     .foregroundColor: NSColor(calibratedRed: 0.08, green: 0.13, blue: 0.22, alpha: 1.0)
 ]
 let subtitleAttributes: [NSAttributedString.Key: Any] = [
     .font: NSFont.systemFont(ofSize: 15, weight: .medium),
     .foregroundColor: NSColor(calibratedRed: 0.35, green: 0.42, blue: 0.52, alpha: 1.0)
 ]
-(title as NSString).draw(at: NSPoint(x: 202, y: 318), withAttributes: titleAttributes)
-(subtitle as NSString).draw(at: NSPoint(x: 203, y: 292), withAttributes: subtitleAttributes)
+(title as NSString).draw(at: NSPoint(x: 218, y: 322), withAttributes: titleAttributes)
+(subtitle as NSString).draw(at: NSPoint(x: 205, y: 294), withAttributes: subtitleAttributes)
 
 let hintAttributes: [NSAttributedString.Key: Any] = [
     .font: NSFont.systemFont(ofSize: 13, weight: .regular),
@@ -99,6 +99,12 @@ tell application "Finder"
         set background picture of theViewOptions to file ".background:background.png"
         set position of item "AutoVolume.app" of container window to {160, 210}
         set position of item "Applications" of container window to {480, 210}
+        try
+            set position of item ".background" of container window to {590, 350}
+        end try
+        try
+            set position of item ".fseventsd" of container window to {590, 350}
+        end try
         update without registering applications
         delay 1
         close
@@ -119,6 +125,9 @@ if [[ -n "${osascript_pid:-}" ]]; then
   wait "$osascript_pid" >/dev/null 2>&1 || true
 fi
 
+rm -rf "/Volumes/AutoVolume/.fseventsd"
+chflags hidden "/Volumes/AutoVolume/.background" >/dev/null 2>&1 || true
+SetFile -a V "/Volumes/AutoVolume/.background" >/dev/null 2>&1 || true
 sync
 hdiutil detach "$device" >/dev/null
 hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null

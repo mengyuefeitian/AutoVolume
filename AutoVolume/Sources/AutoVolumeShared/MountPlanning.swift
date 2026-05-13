@@ -52,6 +52,10 @@ public struct MountPlanner {
             .path
     }
 
+    public func browsePath(for config: VolumeConfig) -> String {
+        exposedPathTarget(for: config) ?? config.mountPoint
+    }
+
     private func quietMountPlan(for config: VolumeConfig, password: String?) throws -> CommandPlan {
         switch config.protocolType {
         case .smb:

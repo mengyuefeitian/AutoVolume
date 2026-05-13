@@ -11,6 +11,7 @@ let engine = AgentEngine(
     commandRunner: commandRunner,
     mountPlanner: MountPlanner()
 )
+let mountPlanner = MountPlanner()
 var scheduler = CheckScheduler()
 let alertStore = AlertStore()
 var networkFailedVolumeIDs = Set<UUID>()
@@ -74,10 +75,12 @@ func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
 }
 
 func openMountedVolume(_ config: VolumeConfig) {
+    let browsePath = mountPlanner.browsePath(for: config)
+    _ = try? commandRunner.run(CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", browsePath]))
     let script = """
     tell application "Finder"
         activate
-        open POSIX file "\(appleScriptEscaped(config.mountPoint))"
+        open (POSIX file "\(appleScriptEscaped(browsePath))" as alias)
     end tell
     """
     let plan = CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script)

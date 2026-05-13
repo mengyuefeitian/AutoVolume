@@ -181,7 +181,7 @@ public final class AppViewModel {
         connectivityTester: ConnectivityTester = ConnectivityTester(),
         smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter(),
         alertStore: AlertStore = AlertStore(),
-        mountStateProvider: MountStateProvider = FileSystemMountStateProvider(),
+        mountStateProvider: MountStateProvider = FileSystemMountStateProvider(validatesResponsiveness: false),
         mountExposure: MountExposure = MountExposure()
     ) {
         self.configStore = configStore
@@ -302,7 +302,10 @@ public final class AppViewModel {
             try smbPreferencesWriter.apply(options: config.smbOptions)
         }
         try runMountCommand(for: config, password: storedPassword)
-        openMountedVolume(config)
+        let openResult = try openMountedVolume(config)
+        if openResult.exitCode != 0 {
+            return "\(strings.mountSucceeded) Finder open failed: \(commandFailureMessage(openResult, action: "Finder"))"
+        }
         return strings.mountSucceeded
     }
 
@@ -369,17 +372,17 @@ public final class AppViewModel {
         refreshAlerts()
     }
 
-    private func openMountedVolume(_ config: VolumeConfig) {
-        DispatchQueue.global(qos: .utility).async { [commandRunner] in
-            let script = """
-            tell application "Finder"
-                activate
-                open POSIX file "\(Self.appleScriptEscaped(config.mountPoint))"
-            end tell
-            """
-            let plan = CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script)
-            _ = try? commandRunner.run(plan)
-        }
+    private func openMountedVolume(_ config: VolumeConfig) throws -> CommandResult {
+        let browsePath = mountPlanner.browsePath(for: config)
+        let openResult = try commandRunner.run(CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", browsePath]))
+        let script = """
+        tell application "Finder"
+            activate
+            open (POSIX file "\(Self.appleScriptEscaped(browsePath))" as alias)
+        end tell
+        """
+        let finderResult = try commandRunner.run(CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script))
+        return finderResult.exitCode == 0 ? finderResult : openResult
     }
 
     private func runTemporaryMountTest(for config: VolumeConfig, password: String?) throws -> CommandResult {
