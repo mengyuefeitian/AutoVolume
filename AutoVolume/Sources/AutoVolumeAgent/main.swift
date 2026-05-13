@@ -74,8 +74,20 @@ func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
 }
 
 func openMountedVolume(_ config: VolumeConfig) {
-    let plan = CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", config.mountPoint])
+    let script = """
+    tell application "Finder"
+        activate
+        open POSIX file "\(appleScriptEscaped(config.mountPoint))"
+    end tell
+    """
+    let plan = CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script)
     _ = try? commandRunner.run(plan)
+}
+
+func appleScriptEscaped(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
 }
 
 func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) -> Date {

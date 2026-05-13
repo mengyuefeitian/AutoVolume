@@ -136,7 +136,9 @@ struct ContentView: View {
         NSApp.activate(ignoringOtherApps: true)
         let editorWindow = NSApp.windows.first { $0.identifier?.rawValue == "volume-editor" }
         if let editorWindow {
-            editorWindow.level = .floating
+            editorWindow.level = .modalPanel
+            editorWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
+            editorWindow.hidesOnDeactivate = false
             editorWindow.orderFrontRegardless()
             editorWindow.makeKeyAndOrderFront(nil)
         } else {

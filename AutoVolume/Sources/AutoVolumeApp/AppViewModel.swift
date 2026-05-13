@@ -83,14 +83,14 @@ struct AppStrings {
                 mountPoint: "Mount Point",
                 checkInterval: "Check Interval",
                 everyMinutes: { "Every \($0) minutes" },
-                testSucceeded: "Connection command succeeded.",
+                testSucceeded: "Connection, credentials, and remote path verified.",
                 mountSucceeded: "Mount command succeeded.",
                 saved: "Saved.",
                 confirmRemove: "Remove this volume?",
                 language: "Language",
                 showPassword: "Show password",
                 hidePassword: "Hide password",
-                testReachabilitySucceeded: "Server is reachable. Credentials are verified during mount.",
+                testReachabilitySucceeded: "Connection, credentials, and remote path verified.",
                 smbDialect: "SMB Range",
                 smbMultichannel: "SMB3 Multichannel",
                 smbAsyncReads: "Async directory reads",
@@ -125,14 +125,14 @@ struct AppStrings {
                 mountPoint: "挂载点",
                 checkInterval: "检查间隔",
                 everyMinutes: { "每 \($0) 分钟" },
-                testSucceeded: "连接命令执行成功。",
+                testSucceeded: "服务器、账号密码和远程路径验证通过。",
                 mountSucceeded: "挂载命令执行成功。",
                 saved: "已保存。",
                 confirmRemove: "移除此网络卷？",
                 language: "语言",
                 showPassword: "显示密码",
                 hidePassword: "隐藏密码",
-                testReachabilitySucceeded: "服务器可达。账号密码会在挂载时验证。",
+                testReachabilitySucceeded: "服务器、账号密码和远程路径验证通过。",
                 smbDialect: "SMB 范围",
                 smbMultichannel: "SMB3 多通道",
                 smbAsyncReads: "异步目录读取",
@@ -283,12 +283,11 @@ public final class AppViewModel {
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
-        let result = try commandRunner.run(try connectivityTester.testPlan(for: config, password: password))
-            .redacting(secrets: [password])
+        let result = try runTemporaryMountTest(for: config, password: password)
         guard result.exitCode == 0 else {
-            throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+            throw AppViewModelError.commandFailed(commandFailureMessage(result, action: "Connection test"))
         }
-        return config.protocolType == .webdav ? strings.testSucceeded : strings.testReachabilitySucceeded
+        return strings.testSucceeded
     }
 
     public func testConnectionAsync(_ config: VolumeConfig, password: String?) async throws -> String {
@@ -363,7 +362,7 @@ public final class AppViewModel {
         try mountExposure.prepare(config: config, planner: mountPlanner)
         let result = try runMountWithRecovery(for: config, password: password)
         guard result.exitCode == 0 else {
-            throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+            throw AppViewModelError.commandFailed(commandFailureMessage(result, action: "Mount"))
         }
         try mountExposure.expose(config: config, planner: mountPlanner)
         try? alertStore.resolve(volumeID: config.id)
@@ -372,9 +371,50 @@ public final class AppViewModel {
 
     private func openMountedVolume(_ config: VolumeConfig) {
         DispatchQueue.global(qos: .utility).async { [commandRunner] in
-            let plan = CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", config.mountPoint])
+            let script = """
+            tell application "Finder"
+                activate
+                open POSIX file "\(Self.appleScriptEscaped(config.mountPoint))"
+            end tell
+            """
+            let plan = CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script)
             _ = try? commandRunner.run(plan)
         }
+    }
+
+    private func runTemporaryMountTest(for config: VolumeConfig, password: String?) throws -> CommandResult {
+        let testRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AutoVolumeConnectionTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testMountPoint = testRoot.appendingPathComponent(config.name.isEmpty ? "Volume" : config.name, isDirectory: true).path
+        let testConfig = VolumeConfig(
+            id: config.id,
+            name: config.name,
+            protocolType: config.protocolType,
+            server: config.server,
+            remotePath: config.remotePath,
+            username: config.username,
+            mountPoint: testMountPoint,
+            checkIntervalSeconds: config.checkIntervalSeconds,
+            isEnabled: config.isEnabled,
+            smbOptions: config.smbOptions
+        )
+        defer {
+            let mountPoint = mountPlanner.effectiveMountPoint(for: testConfig)
+            _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+            _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+            try? FileManager.default.removeItem(at: testRoot)
+        }
+
+        try mountExposure.prepare(config: testConfig, planner: mountPlanner)
+        let result = try runMountWithRecovery(for: testConfig, password: password)
+        guard result.exitCode == 0 else { return result }
+        try mountExposure.expose(config: testConfig, planner: mountPlanner)
+        let probePath = mountPlanner.exposedPathTarget(for: testConfig) ?? mountPlanner.effectiveMountPoint(for: testConfig)
+        guard PathHealthProbe(timeout: 5).isResponsive(path: probePath) else {
+            return CommandResult(exitCode: 1, stdout: "", stderr: "Mounted volume did not respond at the configured remote path.")
+        }
+        return result
     }
 
     private func runMountWithRecovery(for config: VolumeConfig, password: String?) throws -> CommandResult {
@@ -393,6 +433,20 @@ public final class AppViewModel {
     private func isOccupiedMountPointError(_ result: CommandResult) -> Bool {
         let message = "\(result.stdout)\n\(result.stderr)".lowercased()
         return message.contains("file exists") || message.contains("resource busy") || message.contains("already mounted")
+    }
+
+    private func commandFailureMessage(_ result: CommandResult, action: String) -> String {
+        let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+        if detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "\(action) failed with exit code \(result.exitCode)."
+        }
+        return detail
+    }
+
+    private static func appleScriptEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
 

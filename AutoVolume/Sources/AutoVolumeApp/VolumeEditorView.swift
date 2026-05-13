@@ -253,8 +253,9 @@ private struct FloatingWindowAccessor: NSViewRepresentable {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
-            window.level = .floating
-            window.collectionBehavior.insert(.fullScreenAuxiliary)
+            window.level = .modalPanel
+            window.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
+            window.hidesOnDeactivate = false
             window.isReleasedWhenClosed = false
             NSApp.activate(ignoringOtherApps: true)
             window.orderFrontRegardless()
@@ -267,7 +268,9 @@ private struct FloatingWindowAccessor: NSViewRepresentable {
         DispatchQueue.main.async {
             guard let window = nsView.window else { return }
             window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
-            window.level = .floating
+            window.level = .modalPanel
+            window.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
+            window.hidesOnDeactivate = false
             NSApp.activate(ignoringOtherApps: true)
             window.orderFrontRegardless()
             window.makeKeyAndOrderFront(nil)
