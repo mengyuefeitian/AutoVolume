@@ -39,7 +39,10 @@ public struct ConnectivityTester {
         if let components = URLComponents(string: trimmed), let host = components.host {
             return host
         }
-        return trimmed
+        let withoutScheme = trimmed.contains("://")
+            ? (URLComponents(string: trimmed)?.host ?? trimmed)
+            : trimmed
+        return withoutScheme
             .split(separator: "/")
             .first?
             .split(separator: ":")

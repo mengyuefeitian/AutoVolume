@@ -5,6 +5,7 @@ import AutoVolumeShared
 struct ContentView: View {
     @Bindable var viewModel: AppViewModel
     @State private var message: String?
+    @State private var workingVolumeIDs: Set<VolumeConfig.ID> = []
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -46,16 +47,20 @@ struct ContentView: View {
                         Text("\(Int(volume.checkIntervalSeconds / 60))m")
                             .foregroundStyle(.secondary)
                         Button {
-                            do {
-                                message = try viewModel.mount(volume)
-                            } catch {
-                                message = error.localizedDescription
+                            Task {
+                                await mount(volume)
                             }
                         } label: {
-                            Image(systemName: "externaldrive.badge.checkmark")
+                            if workingVolumeIDs.contains(volume.id) {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "externaldrive.badge.checkmark")
+                            }
                         }
                         .buttonStyle(.borderless)
                         .help(viewModel.strings.mount)
+                        .disabled(workingVolumeIDs.contains(volume.id))
                         Button {
                             viewModel.beginEditing(volume)
                             openWindow(id: "volume-editor")
@@ -99,5 +104,17 @@ struct ContentView: View {
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first { $0.identifier?.rawValue == "volume-editor" }?.makeKeyAndOrderFront(nil)
         }
+    }
+
+    @MainActor
+    private func mount(_ volume: VolumeConfig) async {
+        workingVolumeIDs.insert(volume.id)
+        message = viewModel.strings.mounting
+        do {
+            message = try await viewModel.mountAsync(volume)
+        } catch {
+            message = error.localizedDescription
+        }
+        workingVolumeIDs.remove(volume.id)
     }
 }

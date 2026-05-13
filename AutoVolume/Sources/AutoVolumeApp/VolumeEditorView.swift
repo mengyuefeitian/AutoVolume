@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AutoVolumeShared
 
 struct VolumeEditorView: View {
@@ -20,6 +21,7 @@ struct VolumeEditorView: View {
     @State private var smbAsyncDirectoryQueryCount = 10.0
     @State private var message: String?
     @State private var isPasswordVisible = false
+    @State private var isWorking = false
     @Environment(\.dismissWindow) private var dismissWindow
 
     init(
@@ -47,82 +49,94 @@ struct VolumeEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    Text(viewModel.strings.name)
-                    TextField(viewModel.strings.name, text: $name)
-                }
-                GridRow {
-                    Text(viewModel.strings.protocolLabel)
-                    Picker(viewModel.strings.protocolLabel, selection: $protocolType) {
-                        ForEach(VolumeProtocol.allCases) { item in
-                            Text(item.rawValue.uppercased()).tag(item)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                        GridRow {
+                            Text(viewModel.strings.name)
+                            TextField(viewModel.strings.name, text: $name)
                         }
-                    }
-                    .labelsHidden()
-                }
-                GridRow {
-                    Text(viewModel.strings.server)
-                    TextField(viewModel.strings.server, text: $server)
-                }
-                GridRow {
-                    Text(viewModel.strings.remotePath)
-                    TextField(viewModel.strings.remotePath, text: $remotePath)
-                }
-                GridRow {
-                    Text(viewModel.strings.username)
-                    TextField(viewModel.strings.username, text: $username)
-                }
-                GridRow {
-                    Text(viewModel.strings.password)
-                    HStack {
-                        if isPasswordVisible {
-                            TextField(viewModel.strings.password, text: $password)
-                        } else {
-                            SecureField(viewModel.strings.password, text: $password)
+                        GridRow {
+                            Text(viewModel.strings.protocolLabel)
+                            Picker(viewModel.strings.protocolLabel, selection: $protocolType) {
+                                ForEach(VolumeProtocol.allCases) { item in
+                                    Text(item.rawValue.uppercased()).tag(item)
+                                }
+                            }
+                            .labelsHidden()
                         }
-                        Button {
-                            isPasswordVisible.toggle()
-                        } label: {
-                            Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        GridRow {
+                            Text(viewModel.strings.server)
+                            TextField(viewModel.strings.server, text: $server)
                         }
-                        .buttonStyle(.borderless)
-                        .help(isPasswordVisible ? viewModel.strings.hidePassword : viewModel.strings.showPassword)
-                    }
-                }
-                GridRow {
-                    Text(viewModel.strings.mountPoint)
-                    TextField(viewModel.strings.mountPoint, text: $mountPoint)
-                }
-            }
-            Slider(value: $intervalMinutes, in: 1...60, step: 1) {
-                Text(viewModel.strings.checkInterval)
-            }
-            Text(viewModel.strings.everyMinutes(Int(intervalMinutes)))
-                .foregroundStyle(.secondary)
-
-            if protocolType == .smb {
-                Divider()
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                    GridRow {
-                        Text(viewModel.strings.smbDialect)
-                        Picker(viewModel.strings.smbDialect, selection: $smbDialect) {
-                            ForEach(SMBDialect.allCases) { dialect in
-                                Text(dialect.displayName).tag(dialect)
+                        GridRow {
+                            Text(viewModel.strings.remotePath)
+                            VStack(alignment: .leading, spacing: 4) {
+                                TextField(viewModel.strings.remotePath, text: $remotePath)
+                                Text(viewModel.strings.remotePathHelp)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        .labelsHidden()
+                        GridRow {
+                            Text(viewModel.strings.username)
+                            TextField(viewModel.strings.username, text: $username)
+                        }
+                        GridRow {
+                            Text(viewModel.strings.password)
+                            HStack {
+                                if isPasswordVisible {
+                                    TextField(viewModel.strings.password, text: $password)
+                                } else {
+                                    SecureField(viewModel.strings.password, text: $password)
+                                }
+                                Button {
+                                    isPasswordVisible.toggle()
+                                } label: {
+                                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                                }
+                                .buttonStyle(.borderless)
+                                .help(isPasswordVisible ? viewModel.strings.hidePassword : viewModel.strings.showPassword)
+                            }
+                        }
+                        GridRow {
+                            Text(viewModel.strings.mountPoint)
+                            TextField(viewModel.strings.mountPoint, text: $mountPoint)
+                        }
                     }
-                    GridRow {
-                        Text(viewModel.strings.smbMultichannel)
-                        Toggle("", isOn: $isSMBMultichannelEnabled)
-                            .labelsHidden()
+
+                    Slider(value: $intervalMinutes, in: 1...60, step: 1) {
+                        Text(viewModel.strings.checkInterval)
                     }
-                    GridRow {
-                        Text(viewModel.strings.smbAsyncReads)
-                        Stepper("\(Int(smbAsyncDirectoryQueryCount))", value: $smbAsyncDirectoryQueryCount, in: 1...64, step: 1)
+                    Text(viewModel.strings.everyMinutes(Int(intervalMinutes)))
+                        .foregroundStyle(.secondary)
+
+                    if protocolType == .smb {
+                        Divider()
+                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                            GridRow {
+                                Text(viewModel.strings.smbDialect)
+                                Picker(viewModel.strings.smbDialect, selection: $smbDialect) {
+                                    ForEach(SMBDialect.allCases) { dialect in
+                                        Text(dialect.displayName).tag(dialect)
+                                    }
+                                }
+                                .labelsHidden()
+                            }
+                            GridRow {
+                                Text(viewModel.strings.smbMultichannel)
+                                Toggle("", isOn: $isSMBMultichannelEnabled)
+                                    .labelsHidden()
+                            }
+                            GridRow {
+                                Text(viewModel.strings.smbAsyncReads)
+                                Stepper("\(Int(smbAsyncDirectoryQueryCount))", value: $smbAsyncDirectoryQueryCount, in: 1...64, step: 1)
+                            }
+                        }
                     }
                 }
+                .padding(.trailing, 8)
             }
 
             if let message {
@@ -132,46 +146,57 @@ struct VolumeEditorView: View {
             }
 
             HStack {
+                if isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(viewModel.strings.working)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Button(viewModel.strings.cancel) {
                     onCancel()
                     dismissWindow(id: "volume-editor")
                 }
+                .disabled(isWorking)
                 Spacer()
                 Button(viewModel.strings.test) {
-                    do {
-                        message = try viewModel.testConnection(makeConfig(), password: password.isEmpty ? nil : password)
-                    } catch {
-                        message = error.localizedDescription
-                    }
-                }
-                Button(viewModel.strings.save) {
-                    do {
-                        try viewModel.save(makeConfig(), password: password.isEmpty ? nil : password)
-                        onSaved(viewModel.strings.saved)
-                        dismissWindow(id: "volume-editor")
-                    } catch {
-                        message = error.localizedDescription
-                    }
-                }
-                Button(viewModel.strings.saveAndMount) {
-                    do {
-                        let config = makeConfig()
-                        try viewModel.save(config, password: password.isEmpty ? nil : password)
-                        do {
-                            let result = try viewModel.mount(config, password: password.isEmpty ? nil : password)
-                            onSaved(result)
-                        } catch {
-                            onSaved("\(viewModel.strings.saved) \(error.localizedDescription)")
+                    Task {
+                        await runAsync(status: viewModel.strings.testing, closeOnSuccess: false) {
+                            try await viewModel.testConnectionAsync(makeConfig(), password: password.isEmpty ? nil : password)
                         }
-                        dismissWindow(id: "volume-editor")
-                    } catch {
-                        message = error.localizedDescription
+                    }
+                }
+                .disabled(isWorking)
+                Button(viewModel.strings.save) {
+                    Task {
+                        await runAsync(status: viewModel.strings.working, closeOnSuccess: true) {
+                            try await viewModel.saveAsync(makeConfig(), password: password.isEmpty ? nil : password)
+                            return viewModel.strings.saved
+                        }
+                    }
+                }
+                .disabled(isWorking)
+                Button(viewModel.strings.saveAndMount) {
+                    Task {
+                        await runAsync(status: viewModel.strings.mounting, closeOnSuccess: true) {
+                            let config = makeConfig()
+                            try await viewModel.saveAsync(config, password: password.isEmpty ? nil : password)
+                            do {
+                                return try await viewModel.mountAsync(config, password: password.isEmpty ? nil : password)
+                            } catch {
+                                return "\(viewModel.strings.saved) \(error.localizedDescription)"
+                            }
+                        }
                     }
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(isWorking)
             }
+            .padding(.top, 8)
+            .padding(.bottom, 14)
         }
         .padding()
+        .background(FloatingWindowAccessor())
     }
 
     private func makeConfig() -> VolumeConfig {
@@ -197,5 +222,46 @@ struct VolumeEditorView: View {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Volumes", isDirectory: true)
             .path + "/"
+    }
+
+    @MainActor
+    private func runAsync(status: String, closeOnSuccess: Bool, operation: @escaping () async throws -> String) async {
+        isWorking = true
+        message = status
+        do {
+            let result = try await operation()
+            message = result
+            onSaved(result)
+            if closeOnSuccess {
+                dismissWindow(id: "volume-editor")
+            }
+        } catch {
+            message = error.localizedDescription
+        }
+        isWorking = false
+    }
+}
+
+private struct FloatingWindowAccessor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.level = .floating
+            window.collectionBehavior.insert(.fullScreenAuxiliary)
+            window.isReleasedWhenClosed = false
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = nsView.window else { return }
+            window.level = .floating
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 }

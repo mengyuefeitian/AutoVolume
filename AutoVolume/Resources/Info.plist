@@ -13,7 +13,7 @@
     <key>CFBundleName</key>
     <string>AutoVolume</string>
     <key>CFBundleDisplayName</key>
-    <string>AutoVolume 智卷</string>
+    <string>AutoVolume</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

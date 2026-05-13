@@ -32,6 +32,7 @@ struct AppStrings {
     let name: String
     let server: String
     let remotePath: String
+    let remotePathHelp: String
     let username: String
     let password: String
     let protocolLabel: String
@@ -49,6 +50,9 @@ struct AppStrings {
     let smbDialect: String
     let smbMultichannel: String
     let smbAsyncReads: String
+    let working: String
+    let testing: String
+    let mounting: String
 
     static func values(for language: AppLanguage) -> AppStrings {
         switch language {
@@ -62,13 +66,14 @@ struct AppStrings {
                 remove: "Remove",
                 mount: "Mount",
                 unmount: "Unmount",
-                test: "Test",
+                test: "Test Reachability",
                 saveAndMount: "Save & Mount",
                 save: "Save",
                 cancel: "Cancel",
                 name: "Name",
                 server: "Server",
                 remotePath: "Remote Path",
+                remotePathHelp: "Use / for WebDAV root. For SMB, use share or share/folder, for example video or media/2026. Use /, not \\.",
                 username: "Username",
                 password: "Password",
                 protocolLabel: "Protocol",
@@ -85,7 +90,10 @@ struct AppStrings {
                 testReachabilitySucceeded: "Server is reachable. Credentials are verified during mount.",
                 smbDialect: "SMB Mode",
                 smbMultichannel: "SMB3 Multichannel",
-                smbAsyncReads: "Async directory reads"
+                smbAsyncReads: "Async directory reads",
+                working: "Working...",
+                testing: "Testing...",
+                mounting: "Mounting..."
             )
         case .chinese:
             AppStrings(
@@ -97,13 +105,14 @@ struct AppStrings {
                 remove: "移除",
                 mount: "挂载",
                 unmount: "卸载",
-                test: "测试",
+                test: "测试连通性",
                 saveAndMount: "保存并挂载",
                 save: "保存",
                 cancel: "取消",
                 name: "名称",
                 server: "服务器",
                 remotePath: "远程路径",
+                remotePathHelp: "WebDAV 根目录填 /。SMB 填共享名或共享名/文件夹，例如 video 或 media/2026。请使用 /，不要使用 \\。",
                 username: "用户名",
                 password: "密码",
                 protocolLabel: "协议",
@@ -120,7 +129,10 @@ struct AppStrings {
                 testReachabilitySucceeded: "服务器可达。账号密码会在挂载时验证。",
                 smbDialect: "SMB 模式",
                 smbMultichannel: "SMB3 多通道",
-                smbAsyncReads: "异步目录读取"
+                smbAsyncReads: "异步目录读取",
+                working: "处理中...",
+                testing: "测试中...",
+                mounting: "挂载中..."
             )
         }
     }
@@ -227,6 +239,12 @@ public final class AppViewModel {
         return config.protocolType == .webdav ? strings.testSucceeded : strings.testReachabilitySucceeded
     }
 
+    public func testConnectionAsync(_ config: VolumeConfig, password: String?) async throws -> String {
+        try await Task.detached {
+            try self.testConnection(config, password: password)
+        }.value
+    }
+
     public func mount(_ config: VolumeConfig, password: String? = nil) throws -> String {
         let storedPassword = try password ?? credentialStore.password(for: config.id)
         if config.protocolType == .smb {
@@ -234,6 +252,16 @@ public final class AppViewModel {
         }
         try runMountCommand(for: config, password: storedPassword)
         return strings.mountSucceeded
+    }
+
+    public func mountAsync(_ config: VolumeConfig, password: String? = nil) async throws -> String {
+        try await Task.detached {
+            try self.mount(config, password: password)
+        }.value
+    }
+
+    public func saveAsync(_ config: VolumeConfig, password: String?) async throws {
+        try save(config, password: password)
     }
 
     public func unmount(_ config: VolumeConfig) throws {

@@ -27,8 +27,8 @@ public struct MountPlanner {
     private func urlString(scheme: String, config: VolumeConfig, includeUser: Bool = true) throws -> String {
         var components = URLComponents()
         components.scheme = scheme
-        components.host = config.server
-        components.path = "/" + config.remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.host = hostOnly(config.server)
+        components.path = normalizedRemotePath(config.remotePath)
         if includeUser, let username = config.username, !username.isEmpty {
             components.user = username
         }
@@ -43,7 +43,9 @@ public struct MountPlanner {
             throw MountPlanningError.invalidURL
         }
         let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let remotePath = config.remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let remotePath = config.remotePath
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let combinedPath = [basePath, remotePath].filter { !$0.isEmpty }.joined(separator: "/")
         components.path = combinedPath.isEmpty ? "" : "/\(combinedPath)"
         if includeUser, let username = config.username, !username.isEmpty {
@@ -76,5 +78,25 @@ public struct MountPlanner {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private func normalizedRemotePath(_ path: String) -> String {
+        let normalized = path
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return normalized.isEmpty ? "" : "/\(normalized)"
+    }
+
+    private func hostOnly(_ server: String) -> String {
+        let trimmed = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let components = URLComponents(string: trimmed), let host = components.host {
+            return host
+        }
+        return trimmed
+            .split(separator: "/")
+            .first?
+            .split(separator: ":")
+            .first
+            .map(String.init) ?? trimmed
     }
 }

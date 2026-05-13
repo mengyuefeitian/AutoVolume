@@ -80,6 +80,10 @@ func testMountPlanning() throws {
     try expect(smbPlan.arguments == ["-"], "SMB mount should pass AppleScript through stdin")
     try expect(smbPlan.standardInput?.contains("smb://nas.local/team") == true, "SMB mount script missing URL")
 
+    let smbNested = VolumeConfig(name: "Video", protocolType: .smb, server: "smb://nas.local/ignored", remotePath: "/video/projects", username: "mei", mountPoint: "/Volumes/Video", checkIntervalSeconds: 60, isEnabled: true)
+    let smbNestedPlan = try MountPlanner().mountPlan(for: smbNested, password: "secret")
+    try expect(smbNestedPlan.standardInput?.contains("smb://nas.local/video/projects") == true, "SMB mount should normalize host and remote subpath")
+
     let nfs = VolumeConfig(name: "Exports", protocolType: .nfs, server: "nas.local", remotePath: "/exports/team", username: nil, mountPoint: "/Volumes/Exports", checkIntervalSeconds: 60, isEnabled: true)
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)
     try expect(nfsPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["nas.local:/exports/team", "/Volumes/Exports"]), "NFS mount plan mismatch")
@@ -88,6 +92,10 @@ func testMountPlanning() throws {
     let webdavPlan = try MountPlanner().mountPlan(for: webdav, password: "secret")
     try expect(webdavPlan.executable == "/usr/bin/osascript", "WebDAV mount should use AppleScript")
     try expect(webdavPlan.standardInput?.contains("https://dav.example.com/remote.php/dav/files/mei") == true, "WebDAV mount script missing URL")
+
+    let webdavRoot = VolumeConfig(name: "RootDAV", protocolType: .webdav, server: "https://dav.example.com/base", remotePath: "/", username: "mei", mountPoint: "/Volumes/RootDAV", checkIntervalSeconds: 60, isEnabled: true)
+    let webdavRootPlan = try MountPlanner().mountPlan(for: webdavRoot, password: "secret")
+    try expect(webdavRootPlan.standardInput?.contains("https://dav.example.com/base") == true, "WebDAV / should mount the server/base root without an extra path level")
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
