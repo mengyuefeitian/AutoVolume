@@ -25,6 +25,18 @@ public final class AgentEngine {
         guard config.isEnabled else { return .unmounted }
         if mountState.isMounted(config: config) { return .mounted }
 
+        return try mount(config)
+    }
+
+    public func reconnect(_ config: VolumeConfig) throws -> VolumeStatus {
+        guard config.isEnabled else { return .unmounted }
+        let mountPoint = mountPlanner.effectiveMountPoint(for: config)
+        _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+        _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+        return try mount(config)
+    }
+
+    private func mount(_ config: VolumeConfig) throws -> VolumeStatus {
         let password = try credentialStore.password(for: config.id)
         try mountExposure.prepare(config: config, planner: mountPlanner)
         let result = try runMount(config: config, password: password)

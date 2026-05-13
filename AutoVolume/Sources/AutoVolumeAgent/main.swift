@@ -2,14 +2,18 @@ import Foundation
 import AutoVolumeShared
 
 let store = JSONConfigStore()
+let credentialStore = EncryptedFileCredentialStore()
+let commandRunner = ProcessCommandRunner()
+let connectivityTester = ConnectivityTester()
 let engine = AgentEngine(
-    mountState: FileSystemMountStateProvider(),
-    credentialStore: EncryptedFileCredentialStore(),
-    commandRunner: ProcessCommandRunner(),
+    mountState: FileSystemMountStateProvider(validatesResponsiveness: false),
+    credentialStore: credentialStore,
+    commandRunner: commandRunner,
     mountPlanner: MountPlanner()
 )
 var scheduler = CheckScheduler()
 let alertStore = AlertStore()
+var networkFailedVolumeIDs = Set<UUID>()
 
 func runOnce() {
     let configs: [VolumeConfig]
@@ -27,10 +31,23 @@ func runOnce() {
         }
 
         do {
-            let status = try engine.check(config)
+            guard try serverIsReachable(config) else {
+                networkFailedVolumeIDs.insert(config.id)
+                scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, retryInterval: 60, now: now))
+                try? alertStore.record(volumeID: config.id, volumeName: config.name, message: "Server is not reachable. AutoVolume will retry after the network returns.", date: now)
+                continue
+            }
+
+            let status: VolumeStatus
+            if networkFailedVolumeIDs.contains(config.id) {
+                status = try engine.reconnect(config)
+            } else {
+                status = try engine.check(config)
+            }
             scheduler.markChecked(volumeID: config.id, at: checkedDate(for: status, interval: config.checkIntervalSeconds, now: now))
             switch status {
             case .mounted:
+                networkFailedVolumeIDs.remove(config.id)
                 try? alertStore.resolve(volumeID: config.id)
             case .failed(let message):
                 try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
@@ -44,6 +61,13 @@ func runOnce() {
             fputs("AutoVolumeAgent mount error for \(config.name): \(message)\n", stderr)
         }
     }
+}
+
+func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
+    let password = config.protocolType == .webdav ? try credentialStore.password(for: config.id) : nil
+    let plan = try connectivityTester.testPlan(for: config, password: password)
+    let result = try commandRunner.run(plan).redacting(secrets: [password])
+    return result.exitCode == 0
 }
 
 func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) -> Date {

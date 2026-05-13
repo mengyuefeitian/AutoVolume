@@ -9,11 +9,18 @@ public final class FileSystemMountStateProvider: MountStateProvider {
     private let fileManager: FileManager
     private let mountPlanner: MountPlanner
     private let healthCheckTimeout: TimeInterval
+    private let validatesResponsiveness: Bool
 
-    public init(fileManager: FileManager = .default, mountPlanner: MountPlanner = MountPlanner(), healthCheckTimeout: TimeInterval = 5) {
+    public init(
+        fileManager: FileManager = .default,
+        mountPlanner: MountPlanner = MountPlanner(),
+        healthCheckTimeout: TimeInterval = 5,
+        validatesResponsiveness: Bool = true
+    ) {
         self.fileManager = fileManager
         self.mountPlanner = mountPlanner
         self.healthCheckTimeout = healthCheckTimeout
+        self.validatesResponsiveness = validatesResponsiveness
     }
 
     public func isMounted(config: VolumeConfig) -> Bool {
@@ -23,9 +30,14 @@ public final class FileSystemMountStateProvider: MountStateProvider {
         }
         if fileManager.fileExists(atPath: mountURL.path),
            mountedURLs.contains(where: { $0.standardizedFileURL.path == mountURL.standardizedFileURL.path }) {
-            return isResponsive(config: config)
+            return isResponsiveIfNeeded(config: config)
         }
-        return SystemMountTable().contains(config: config) && isResponsive(config: config)
+        return SystemMountTable().contains(config: config) && isResponsiveIfNeeded(config: config)
+    }
+
+    private func isResponsiveIfNeeded(config: VolumeConfig) -> Bool {
+        guard validatesResponsiveness else { return true }
+        return isResponsive(config: config)
     }
 
     private func isResponsive(config: VolumeConfig) -> Bool {

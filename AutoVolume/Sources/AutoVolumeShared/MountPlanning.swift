@@ -57,7 +57,7 @@ public struct MountPlanner {
         case .smb:
             return CommandPlan(
                 executable: "/sbin/mount_smbfs",
-                arguments: ["-o", "nopassprompt", try smbFileSystemURL(config: config, password: password), effectiveMountPoint(for: config)]
+                arguments: ["-o", "nopassprompt,soft", try smbFileSystemURL(config: config, password: password), effectiveMountPoint(for: config)]
             )
         case .webdav:
             return CommandPlan(
@@ -70,7 +70,7 @@ public struct MountPlanner {
                 arguments: ["-s", try urlString(scheme: "afp", config: config, includeUser: true, password: password), config.mountPoint]
             )
         case .nfs:
-            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
+            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["-o", "soft", "\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
         }
     }
 

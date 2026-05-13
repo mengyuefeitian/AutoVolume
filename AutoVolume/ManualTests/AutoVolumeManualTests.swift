@@ -111,7 +111,7 @@ func testMountPlanning() throws {
     try expect(smbNestedPlan.standardInput?.contains("smb://nas.local/video/projects") == true, "SMB mount should normalize host and remote subpath")
     let quietSMBPlan = try MountPlanner().mountPlan(for: smbNested, password: "secret", suppressesUserInterface: true)
     try expect(quietSMBPlan.executable == "/sbin/mount_smbfs", "Quiet SMB mount should avoid AppleScript")
-    try expect(quietSMBPlan.arguments.contains("nopassprompt"), "Quiet SMB mount should suppress password prompts")
+    try expect(quietSMBPlan.arguments.contains("nopassprompt,soft"), "Quiet SMB mount should suppress prompts and use a soft mount")
     try expect(quietSMBPlan.arguments.contains("//mei:secret@nas.local/video"), "Quiet SMB mount should mount the share only")
     try expect(MountPlanner().exposedPathTarget(for: smbNested)?.hasSuffix("/projects") == true, "Nested SMB mount should expose the subdirectory")
 
@@ -229,6 +229,16 @@ func testAgentEngineDecisions() throws {
     let occupiedStatus = try occupiedEngine.check(unmounted)
     try expect(occupiedStatus == .mounted, "Occupied stale mount point should be unmounted and retried")
     try expect(occupiedRunner.plans.map(\.executable) == ["/sbin/mount_smbfs", "/usr/sbin/diskutil", "/sbin/umount", "/sbin/mount_smbfs"], "Occupied stale mount point recovery command order mismatch")
+
+    let reconnectRunner = SequenceCommandRunner(results: [
+        CommandResult(exitCode: 0, stdout: "", stderr: ""),
+        CommandResult(exitCode: 0, stdout: "", stderr: ""),
+        CommandResult(exitCode: 0, stdout: "", stderr: "")
+    ])
+    let reconnectEngine = AgentEngine(mountState: FakeMountStateProvider(isMounted: true), credentialStore: credentials, commandRunner: reconnectRunner, mountPlanner: MountPlanner())
+    let reconnectStatus = try reconnectEngine.reconnect(unmounted)
+    try expect(reconnectStatus == .mounted, "Reconnect should remount after a network outage")
+    try expect(reconnectRunner.plans.map(\.executable) == ["/usr/sbin/diskutil", "/sbin/umount", "/sbin/mount_smbfs"], "Reconnect command order mismatch")
 }
 
 func testSystemMountTableMatchesServerMounts() throws {

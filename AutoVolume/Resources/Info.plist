@@ -26,5 +26,9 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>AutoVolume connects to your configured file servers to test and restore network mounts.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>AutoVolume checks mounted network volumes to show status and reconnect them when the network returns.</string>
 </dict>
 </plist>
