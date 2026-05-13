@@ -90,6 +90,9 @@ let hintAttributes: [NSAttributedString.Key: Any] = [
     .font: NSFont.systemFont(ofSize: 13, weight: .regular),
     .foregroundColor: NSColor(calibratedRed: 0.43, green: 0.49, blue: 0.58, alpha: 1.0)
 ]
+if let applicationsIcon = NSImage(contentsOfFile: "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/ApplicationsFolderIcon.icns") {
+    applicationsIcon.draw(in: NSRect(x: 432, y: 154, width: 96, height: 96), from: .zero, operation: .sourceOver, fraction: 1.0)
+}
 ("AutoVolume" as NSString).draw(at: NSPoint(x: 122, y: 96), withAttributes: hintAttributes)
 ("Applications" as NSString).draw(at: NSPoint(x: 444, y: 96), withAttributes: hintAttributes)
 

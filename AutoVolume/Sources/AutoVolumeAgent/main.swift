@@ -5,8 +5,9 @@ let store = JSONConfigStore()
 let credentialStore = EncryptedFileCredentialStore()
 let commandRunner = ProcessCommandRunner()
 let connectivityTester = ConnectivityTester()
+let mountStateProvider = FileSystemMountStateProvider(validatesResponsiveness: false)
 let engine = AgentEngine(
-    mountState: FileSystemMountStateProvider(validatesResponsiveness: false),
+    mountState: mountStateProvider,
     credentialStore: credentialStore,
     commandRunner: commandRunner,
     mountPlanner: MountPlanner()
@@ -40,6 +41,7 @@ func runOnce() {
             }
 
             let status: VolumeStatus
+            let wasMounted = mountStateProvider.isMounted(config: config)
             if networkFailedVolumeIDs.contains(config.id) {
                 status = try engine.reconnect(config)
                 if status == .mounted {
@@ -47,6 +49,9 @@ func runOnce() {
                 }
             } else {
                 status = try engine.check(config)
+                if !wasMounted, status == .mounted {
+                    openMountedVolume(config)
+                }
             }
             scheduler.markChecked(volumeID: config.id, at: checkedDate(for: status, interval: config.checkIntervalSeconds, now: now))
             switch status {
