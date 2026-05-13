@@ -29,8 +29,8 @@
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>AutoVolume connects to your configured file servers to test and restore network mounts.</string>
+    <string>AutoVolume 需要连接你配置的文件服务器，用于测试和恢复网络挂载。</string>
     <key>NSNetworkVolumesUsageDescription</key>
-    <string>AutoVolume checks mounted network volumes to show status and reconnect them when the network returns.</string>
+    <string>AutoVolume 需要访问网络卷宗，用于显示挂载状态并在网络恢复后重新连接。</string>
 </dict>
 </plist>

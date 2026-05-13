@@ -9,6 +9,7 @@ RW_DMG="$ROOT/dist/AutoVolume-$VERSION-local-rw.dmg"
 STAGING="$ROOT/dist/dmg-staging"
 MOUNT_POINT="$ROOT/dist/dmg-mount"
 BACKGROUND="$STAGING/.background/background.png"
+ARROW_SOURCE="/Users/xiaoan/Downloads/拖入.png"
 
 if [[ ! -d "$APP" ]]; then
   echo "Missing app bundle: $APP" >&2
@@ -18,17 +19,25 @@ fi
 rm -rf "$STAGING" "$MOUNT_POINT" "$RW_DMG" "$DMG"
 mkdir -p "$STAGING/.background"
 cp -R "$APP" "$STAGING/AutoVolume.app"
-ln -s /Applications "$STAGING/Applications"
+/usr/bin/osascript <<APPLESCRIPT >/dev/null
+tell application "Finder"
+    make new alias file to POSIX file "/Applications" at POSIX file "$STAGING"
+end tell
+APPLESCRIPT
+if [[ -e "$STAGING/应用程序" ]]; then
+  mv "$STAGING/应用程序" "$STAGING/Applications"
+fi
 cleanup() {
   hdiutil detach "/Volumes/AutoVolume" >/dev/null 2>&1 || true
   rm -rf "$STAGING" "$RW_DMG"
 }
 trap cleanup EXIT
 
-swift - "$BACKGROUND" <<'SWIFT'
+swift - "$BACKGROUND" "$ARROW_SOURCE" <<'SWIFT'
 import AppKit
 
 let output = CommandLine.arguments[1]
+let arrowSource = CommandLine.arguments[2]
 let size = NSSize(width: 640, height: 420)
 let image = NSImage(size: size)
 image.lockFocus()
@@ -40,17 +49,29 @@ let panel = NSBezierPath(roundedRect: NSRect(x: 28, y: 28, width: 584, height: 3
 NSColor(calibratedWhite: 1.0, alpha: 0.78).setFill()
 panel.fill()
 
-let arrow = NSBezierPath()
-arrow.lineWidth = 8
-arrow.lineCapStyle = .round
-arrow.lineJoinStyle = .round
-arrow.move(to: NSPoint(x: 244, y: 206))
-arrow.curve(to: NSPoint(x: 397, y: 206), controlPoint1: NSPoint(x: 290, y: 260), controlPoint2: NSPoint(x: 350, y: 260))
-arrow.move(to: NSPoint(x: 365, y: 238))
-arrow.line(to: NSPoint(x: 399, y: 206))
-arrow.line(to: NSPoint(x: 358, y: 184))
-NSColor(calibratedRed: 0.14, green: 0.38, blue: 0.78, alpha: 0.88).setStroke()
-arrow.stroke()
+if let arrowImage = NSImage(contentsOfFile: arrowSource) {
+    let drawRect = NSRect(x: 270, y: 150, width: 116, height: 116)
+    NSGraphicsContext.current?.saveGraphicsState()
+    let transform = NSAffineTransform()
+    transform.translateX(by: drawRect.midX, yBy: drawRect.midY)
+    transform.rotate(byDegrees: 45)
+    transform.translateX(by: -drawRect.midX, yBy: -drawRect.midY)
+    transform.concat()
+    arrowImage.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 0.92)
+    NSGraphicsContext.current?.restoreGraphicsState()
+} else {
+    let arrow = NSBezierPath()
+    arrow.lineWidth = 8
+    arrow.lineCapStyle = .round
+    arrow.lineJoinStyle = .round
+    arrow.move(to: NSPoint(x: 244, y: 206))
+    arrow.curve(to: NSPoint(x: 397, y: 206), controlPoint1: NSPoint(x: 290, y: 260), controlPoint2: NSPoint(x: 350, y: 260))
+    arrow.move(to: NSPoint(x: 365, y: 238))
+    arrow.line(to: NSPoint(x: 399, y: 206))
+    arrow.line(to: NSPoint(x: 358, y: 184))
+    NSColor(calibratedRed: 0.14, green: 0.38, blue: 0.78, alpha: 0.88).setStroke()
+    arrow.stroke()
+}
 
 let title = "拖入应用程序"
 let subtitle = "Drag AutoVolume into Applications"
@@ -70,7 +91,7 @@ let hintAttributes: [NSAttributedString.Key: Any] = [
     .foregroundColor: NSColor(calibratedRed: 0.43, green: 0.49, blue: 0.58, alpha: 1.0)
 ]
 ("AutoVolume" as NSString).draw(at: NSPoint(x: 122, y: 96), withAttributes: hintAttributes)
-("Applications" as NSString).draw(at: NSPoint(x: 454, y: 96), withAttributes: hintAttributes)
+("Applications" as NSString).draw(at: NSPoint(x: 444, y: 96), withAttributes: hintAttributes)
 
 image.unlockFocus()
 guard let data = image.tiffRepresentation,

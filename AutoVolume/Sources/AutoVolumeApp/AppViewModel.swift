@@ -374,11 +374,12 @@ public final class AppViewModel {
 
     private func openMountedVolume(_ config: VolumeConfig) throws -> CommandResult {
         let browsePath = mountPlanner.browsePath(for: config)
+        Thread.sleep(forTimeInterval: 0.6)
         let openResult = try commandRunner.run(CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", browsePath]))
         let script = """
         tell application "Finder"
             activate
-            open (POSIX file "\(Self.appleScriptEscaped(browsePath))" as alias)
+            make new Finder window to (POSIX file "\(Self.appleScriptEscaped(browsePath))" as alias)
         end tell
         """
         let finderResult = try commandRunner.run(CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script))
