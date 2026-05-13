@@ -78,6 +78,10 @@ public struct MountPlanner {
         CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", mountPoint])
     }
 
+    public func forceUnmountPlan(mountPoint: String) -> CommandPlan {
+        CommandPlan(executable: "/sbin/umount", arguments: ["-f", mountPoint])
+    }
+
     private func urlString(scheme: String, config: VolumeConfig, includeUser: Bool = true, password: String? = nil) throws -> String {
         var components = URLComponents()
         components.scheme = scheme

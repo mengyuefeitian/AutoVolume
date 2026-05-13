@@ -360,15 +360,31 @@ public final class AppViewModel {
 
     private func runMountCommand(for config: VolumeConfig, password: String?) throws {
         try mountExposure.prepare(config: config, planner: mountPlanner)
-        let result = try commandRunner
-            .run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
-            .redacting(secrets: [password])
+        let result = try runMountWithRecovery(for: config, password: password)
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
         try mountExposure.expose(config: config, planner: mountPlanner)
         try? alertStore.resolve(volumeID: config.id)
         refreshAlerts()
+    }
+
+    private func runMountWithRecovery(for config: VolumeConfig, password: String?) throws -> CommandResult {
+        let plan = try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true)
+        let result = try commandRunner.run(plan).redacting(secrets: [password])
+        guard result.exitCode != 0, isOccupiedMountPointError(result) else {
+            return result
+        }
+
+        let mountPoint = mountPlanner.effectiveMountPoint(for: config)
+        _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+        _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+        return try commandRunner.run(plan).redacting(secrets: [password])
+    }
+
+    private func isOccupiedMountPointError(_ result: CommandResult) -> Bool {
+        let message = "\(result.stdout)\n\(result.stderr)".lowercased()
+        return message.contains("file exists") || message.contains("resource busy") || message.contains("already mounted")
     }
 }
 

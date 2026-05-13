@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public protocol MountStateProvider {
     func isMounted(config: VolumeConfig) -> Bool
@@ -6,9 +7,13 @@ public protocol MountStateProvider {
 
 public final class FileSystemMountStateProvider: MountStateProvider {
     private let fileManager: FileManager
+    private let mountPlanner: MountPlanner
+    private let healthCheckTimeout: TimeInterval
 
-    public init(fileManager: FileManager = .default) {
+    public init(fileManager: FileManager = .default, mountPlanner: MountPlanner = MountPlanner(), healthCheckTimeout: TimeInterval = 5) {
         self.fileManager = fileManager
+        self.mountPlanner = mountPlanner
+        self.healthCheckTimeout = healthCheckTimeout
     }
 
     public func isMounted(config: VolumeConfig) -> Bool {
@@ -18,9 +23,53 @@ public final class FileSystemMountStateProvider: MountStateProvider {
         }
         if fileManager.fileExists(atPath: mountURL.path),
            mountedURLs.contains(where: { $0.standardizedFileURL.path == mountURL.standardizedFileURL.path }) {
-            return true
+            return isResponsive(config: config)
         }
-        return SystemMountTable().contains(config: config)
+        return SystemMountTable().contains(config: config) && isResponsive(config: config)
+    }
+
+    private func isResponsive(config: VolumeConfig) -> Bool {
+        let path = mountPlanner.exposedPathTarget(for: config) ?? mountPlanner.effectiveMountPoint(for: config)
+        return PathHealthProbe(timeout: healthCheckTimeout).isResponsive(path: path)
+    }
+}
+
+public struct PathHealthProbe {
+    private let timeout: TimeInterval
+
+    public init(timeout: TimeInterval = 5) {
+        self.timeout = timeout
+    }
+
+    public func isResponsive(path: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ls")
+        process.arguments = ["-1", path]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            group.leave()
+        }
+
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.2)
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            return false
+        }
+        return process.terminationStatus == 0
     }
 }
 

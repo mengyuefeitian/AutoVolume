@@ -140,6 +140,8 @@ func testMountPlanning() throws {
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
+    let forceUnmountPlan = MountPlanner().forceUnmountPlan(mountPoint: "/Volumes/Team")
+    try expect(forceUnmountPlan == CommandPlan(executable: "/sbin/umount", arguments: ["-f", "/Volumes/Team"]), "Force unmount plan mismatch")
 }
 
 func testConnectivityPlanning() throws {
@@ -183,6 +185,15 @@ func testMountExposureCreatesSubdirectoryLink() throws {
     try expect(destination == target, "Nested SMB exposure should point the visible mount entry at the configured subdirectory")
 }
 
+func testPathHealthProbe() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    try expect(PathHealthProbe(timeout: 1).isResponsive(path: directory.path), "Existing directory should be responsive")
+    try expect(!PathHealthProbe(timeout: 1).isResponsive(path: directory.appendingPathComponent("missing").path), "Missing path should be unhealthy")
+}
+
 func testAgentEngineDecisions() throws {
     let testMountRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: testMountRoot) }
@@ -207,6 +218,17 @@ func testAgentEngineDecisions() throws {
     let unmountedStatus = try unmountedEngine.check(unmounted)
     try expect(unmountedStatus == .mounted, "Unmounted volume should mount successfully")
     try expect(unmountedRunner.plans.first?.executable == "/sbin/mount_smbfs", "Agent should use quiet SMB mount")
+
+    let occupiedRunner = SequenceCommandRunner(results: [
+        CommandResult(exitCode: 1, stdout: "", stderr: "mount_smbfs: File exists"),
+        CommandResult(exitCode: 0, stdout: "", stderr: ""),
+        CommandResult(exitCode: 0, stdout: "", stderr: ""),
+        CommandResult(exitCode: 0, stdout: "", stderr: "")
+    ])
+    let occupiedEngine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: credentials, commandRunner: occupiedRunner, mountPlanner: MountPlanner())
+    let occupiedStatus = try occupiedEngine.check(unmounted)
+    try expect(occupiedStatus == .mounted, "Occupied stale mount point should be unmounted and retried")
+    try expect(occupiedRunner.plans.map(\.executable) == ["/sbin/mount_smbfs", "/usr/sbin/diskutil", "/sbin/umount", "/sbin/mount_smbfs"], "Occupied stale mount point recovery command order mismatch")
 }
 
 func testSystemMountTableMatchesServerMounts() throws {
@@ -268,6 +290,23 @@ final class RecordingCommandRunner: CommandRunner {
     }
 }
 
+final class SequenceCommandRunner: CommandRunner {
+    var plans: [CommandPlan] = []
+    private var results: [CommandResult]
+
+    init(results: [CommandResult]) {
+        self.results = results
+    }
+
+    func run(_ plan: CommandPlan) throws -> CommandResult {
+        plans.append(plan)
+        if results.isEmpty {
+            return CommandResult(exitCode: 0, stdout: "", stderr: "")
+        }
+        return results.removeFirst()
+    }
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("VolumeConfig JSON round trip", testVolumeConfigRoundTripsThroughJSON),
     ("ConfigStore save/load", testConfigStoreSaveLoadAndMissingFile),
@@ -277,6 +316,7 @@ let tests: [(String, () throws -> Void)] = [
     ("MountPlanning", testMountPlanning),
     ("ConnectivityPlanning", testConnectivityPlanning),
     ("MountExposure", testMountExposureCreatesSubdirectoryLink),
+    ("PathHealthProbe", testPathHealthProbe),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
     ("CheckScheduler", testCheckScheduler),
