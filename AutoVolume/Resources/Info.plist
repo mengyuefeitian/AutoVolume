@@ -8,6 +8,8 @@
     <string>AutoVolume</string>
     <key>CFBundleIdentifier</key>
     <string>com.autovolume.app</string>
+    <key>CFBundleIconFile</key>
+    <string>AutoVolume</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

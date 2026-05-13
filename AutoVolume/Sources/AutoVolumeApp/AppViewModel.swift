@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import Observation
 import AutoVolumeShared
 
@@ -372,9 +371,9 @@ public final class AppViewModel {
     }
 
     private func openMountedVolume(_ config: VolumeConfig) {
-        let url = URL(fileURLWithPath: config.mountPoint, isDirectory: true)
-        DispatchQueue.main.async {
-            NSWorkspace.shared.open(url)
+        DispatchQueue.global(qos: .utility).async { [commandRunner] in
+            let plan = CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", config.mountPoint])
+            _ = try? commandRunner.run(plan)
         }
     }
 

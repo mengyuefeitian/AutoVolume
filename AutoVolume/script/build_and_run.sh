@@ -72,6 +72,7 @@ cp "$BUILD/AutoVolumeApp" "$APP/Contents/MacOS/AutoVolume"
 cp "$BUILD/AutoVolumeAgent" "$APP/Contents/Resources/AutoVolumeAgent"
 cp "$BUILD/shared/libAutoVolumeShared.dylib" "$APP/Contents/Frameworks/libAutoVolumeShared.dylib"
 cp "$ROOT/Resources/com.autovolume.agent.plist" "$APP/Contents/Resources/com.autovolume.agent.plist"
+cp "$ROOT/Resources/AutoVolume.icns" "$APP/Contents/Resources/AutoVolume.icns"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 codesign --force --sign - "$APP/Contents/Frameworks/libAutoVolumeShared.dylib"

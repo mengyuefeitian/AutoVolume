@@ -74,7 +74,7 @@ func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
 }
 
 func openMountedVolume(_ config: VolumeConfig) {
-    let plan = CommandPlan(executable: "/usr/bin/open", arguments: [config.mountPoint])
+    let plan = CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", config.mountPoint])
     _ = try? commandRunner.run(plan)
 }
 
