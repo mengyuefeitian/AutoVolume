@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Security
 
 public protocol CredentialStore {
@@ -8,8 +9,9 @@ public protocol CredentialStore {
 }
 
 public enum CredentialStoreError: Error, Equatable {
-    case keychainFailure(OSStatus)
     case invalidPasswordData
+    case encryptionFailed
+    case randomGenerationFailed
 }
 
 public final class InMemoryCredentialStore: CredentialStore {
@@ -30,111 +32,114 @@ public final class InMemoryCredentialStore: CredentialStore {
     }
 }
 
-public final class KeychainCredentialStore: CredentialStore {
-    private let service = "com.autovolume.credentials"
-    private let allowsAuthenticationUI: Bool
+public final class EncryptedFileCredentialStore: CredentialStore {
+    private struct Database: Codable {
+        var version: Int
+        var records: [String: EncryptedRecord]
+    }
 
-    public init(allowsAuthenticationUI: Bool = true) {
-        self.allowsAuthenticationUI = allowsAuthenticationUI
+    private struct EncryptedRecord: Codable {
+        var salt: String
+        var nonce: String
+        var ciphertext: String
+        var tag: String
+    }
+
+    private let directory: URL
+    private let databaseURL: URL
+    private let secretURL: URL
+
+    public init(directory: URL? = nil) {
+        self.directory = directory ?? FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("AutoVolume", isDirectory: true)
+        self.databaseURL = self.directory.appendingPathComponent("credentials.db")
+        self.secretURL = self.directory.appendingPathComponent("credentials.secret")
     }
 
     public func password(for volumeID: UUID) throws -> String? {
-        var query = baseQuery(for: volumeID)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        if !allowsAuthenticationUI {
-            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
-        }
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess else { throw CredentialStoreError.keychainFailure(status) }
-        guard let data = result as? Data, let password = String(data: data, encoding: .utf8) else {
+        let database = try loadDatabase()
+        guard let record = database.records[volumeID.uuidString] else { return nil }
+        guard let salt = Data(base64Encoded: record.salt),
+              let nonceData = Data(base64Encoded: record.nonce),
+              let ciphertext = Data(base64Encoded: record.ciphertext),
+              let tag = Data(base64Encoded: record.tag),
+              let nonce = try? AES.GCM.Nonce(data: nonceData) else {
             throw CredentialStoreError.invalidPasswordData
         }
-        if allowsAuthenticationUI {
-            try? refreshAccess(for: volumeID)
+        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+        let decryptedData = try AES.GCM.open(sealedBox, using: key(for: salt))
+        guard let password = String(data: decryptedData, encoding: .utf8) else {
+            throw CredentialStoreError.invalidPasswordData
         }
         return password
     }
 
     public func savePassword(_ password: String, for volumeID: UUID) throws {
-        let passwordData = Data(password.utf8)
-        var attributes: [String: Any] = [kSecValueData as String: passwordData]
-        if let access = Self.keychainAccess() {
-            attributes[kSecAttrAccess as String] = access
-        }
-
-        let updateStatus = SecItemUpdate(baseQuery(for: volumeID) as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw CredentialStoreError.keychainFailure(updateStatus)
-        }
-
-        var item = baseQuery(for: volumeID)
-        item.merge(attributes) { _, new in new }
-        let addStatus = SecItemAdd(item as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { throw CredentialStoreError.keychainFailure(addStatus) }
+        var database = try loadDatabase()
+        let salt = try randomData(count: 32)
+        let nonce = AES.GCM.Nonce()
+        let sealedBox = try AES.GCM.seal(Data(password.utf8), using: key(for: salt), nonce: nonce)
+        database.records[volumeID.uuidString] = EncryptedRecord(
+            salt: salt.base64EncodedString(),
+            nonce: Data(nonce).base64EncodedString(),
+            ciphertext: sealedBox.ciphertext.base64EncodedString(),
+            tag: sealedBox.tag.base64EncodedString()
+        )
+        try save(database)
     }
 
     public func deletePassword(for volumeID: UUID) throws {
-        let status = SecItemDelete(baseQuery(for: volumeID) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw CredentialStoreError.keychainFailure(status)
-        }
+        var database = try loadDatabase()
+        database.records.removeValue(forKey: volumeID.uuidString)
+        try save(database)
     }
 
-    private func refreshAccess(for volumeID: UUID) throws {
-        guard let access = Self.keychainAccess() else { return }
-        let attributes = [kSecAttrAccess as String: access]
-        let status = SecItemUpdate(baseQuery(for: volumeID) as CFDictionary, attributes as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw CredentialStoreError.keychainFailure(status)
+    private func loadDatabase() throws -> Database {
+        guard FileManager.default.fileExists(atPath: databaseURL.path) else {
+            return Database(version: 1, records: [:])
         }
+        let data = try Data(contentsOf: databaseURL)
+        return try JSONDecoder().decode(Database.self, from: data)
     }
 
-    private func baseQuery(for volumeID: UUID) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: volumeID.uuidString
-        ]
+    private func save(_ database: Database) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(database).write(to: databaseURL, options: .atomic)
+        try restrictOwnerAccess(to: databaseURL)
     }
 
-    private static func keychainAccess() -> SecAccess? {
-        let trustedApplications = trustedApplicationPaths().compactMap { path -> SecTrustedApplication? in
-            var trustedApplication: SecTrustedApplication?
-            let status = SecTrustedApplicationCreateFromPath(path, &trustedApplication)
-            guard status == errSecSuccess else { return nil }
-            return trustedApplication
-        }
-
-        guard !trustedApplications.isEmpty else { return nil }
-        var access: SecAccess?
-        let status = SecAccessCreate("AutoVolume network volume credentials" as CFString, trustedApplications as CFArray, &access)
-        guard status == errSecSuccess else { return nil }
-        return access
+    private func key(for salt: Data) throws -> SymmetricKey {
+        var keyMaterial = Data()
+        keyMaterial.append(try localSecret())
+        keyMaterial.append(salt)
+        return SymmetricKey(data: Data(SHA256.hash(data: keyMaterial)))
     }
 
-    private static func trustedApplicationPaths() -> [String?] {
-        var paths: [String?] = [nil]
-        let mainBundle = Bundle.main
-        let executablePath = mainBundle.executablePath ?? CommandLine.arguments.first
-        if let executablePath {
-            paths.append(executablePath)
+    private func localSecret() throws -> Data {
+        if FileManager.default.fileExists(atPath: secretURL.path) {
+            return try Data(contentsOf: secretURL)
         }
-        if let bundledAgentPath = mainBundle.url(forResource: "AutoVolumeAgent", withExtension: nil)?.path {
-            paths.append(bundledAgentPath)
-        } else if let executablePath {
-            let executableURL = URL(fileURLWithPath: executablePath)
-            let bundledAgentURL = executableURL
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Resources", isDirectory: true)
-                .appendingPathComponent("AutoVolumeAgent")
-            paths.append(bundledAgentURL.path)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let secret = try randomData(count: 32)
+        try secret.write(to: secretURL, options: .atomic)
+        try restrictOwnerAccess(to: secretURL)
+        return secret
+    }
+
+    private func randomData(count: Int) throws -> Data {
+        var data = Data(count: count)
+        let status = data.withUnsafeMutableBytes { buffer in
+            SecRandomCopyBytes(kSecRandomDefault, count, buffer.baseAddress!)
         }
-        return Array(Set(paths))
+        guard status == errSecSuccess else { throw CredentialStoreError.randomGenerationFailed }
+        return data
+    }
+
+    private func restrictOwnerAccess(to url: URL) throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

@@ -22,6 +22,32 @@ public struct CommandResult: Equatable {
         self.stdout = stdout
         self.stderr = stderr
     }
+
+    public func redacting(secrets: [String?]) -> CommandResult {
+        CommandResult(
+            exitCode: exitCode,
+            stdout: Self.redacted(stdout, secrets: secrets),
+            stderr: Self.redacted(stderr, secrets: secrets)
+        )
+    }
+
+    public static func redacted(_ value: String, secrets: [String?] = []) -> String {
+        var redactedValue = value
+        for secret in secrets.compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            redactedValue = redactedValue.replacingOccurrences(of: secret, with: "<redacted>")
+        }
+        redactedValue = redactedValue.replacingOccurrences(
+            of: #"//([^/\s:@]+):([^@\s]+)@"#,
+            with: #"//$1:<redacted>@"#,
+            options: .regularExpression
+        )
+        redactedValue = redactedValue.replacingOccurrences(
+            of: #"://([^/\s:@]+):([^@\s]+)@"#,
+            with: #"://$1:<redacted>@"#,
+            options: .regularExpression
+        )
+        return redactedValue
+    }
 }
 
 public protocol CommandRunner {

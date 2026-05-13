@@ -27,7 +27,9 @@ public final class AgentEngine {
             at: URL(fileURLWithPath: config.mountPoint),
             withIntermediateDirectories: true
         )
-        let result = try commandRunner.run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
+        let result = try commandRunner
+            .run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
+            .redacting(secrets: [password])
         if result.exitCode == 0 {
             return .mounted
         }

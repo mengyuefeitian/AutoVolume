@@ -174,7 +174,7 @@ public final class AppViewModel {
 
     public init(
         configStore: ConfigStore = JSONConfigStore(),
-        credentialStore: CredentialStore = KeychainCredentialStore(),
+        credentialStore: CredentialStore = EncryptedFileCredentialStore(),
         commandRunner: CommandRunner = ProcessCommandRunner(),
         mountPlanner: MountPlanner = MountPlanner(),
         connectivityTester: ConnectivityTester = ConnectivityTester(),
@@ -281,6 +281,7 @@ public final class AppViewModel {
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
         let result = try commandRunner.run(try connectivityTester.testPlan(for: config, password: password))
+            .redacting(secrets: [password])
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
@@ -359,7 +360,9 @@ public final class AppViewModel {
             at: URL(fileURLWithPath: config.mountPoint),
             withIntermediateDirectories: true
         )
-        let result = try commandRunner.run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
+        let result = try commandRunner
+            .run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
+            .redacting(secrets: [password])
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }

@@ -73,6 +73,32 @@ func testInMemoryCredentialStore() throws {
     try expect(deletedPassword == nil, "Password was not deleted")
 }
 
+func testEncryptedFileCredentialStore() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = EncryptedFileCredentialStore(directory: directory)
+    let id = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+
+    try store.savePassword("secret", for: id)
+    let savedPassword = try store.password(for: id)
+    try expect(savedPassword == "secret", "Encrypted password should round trip")
+
+    let databaseURL = directory.appendingPathComponent("credentials.db")
+    let databaseText = try String(contentsOf: databaseURL, encoding: .utf8)
+    try expect(!databaseText.contains("secret"), "Encrypted credential database must not store plaintext passwords")
+
+    try store.deletePassword(for: id)
+    let deletedPassword = try store.password(for: id)
+    try expect(deletedPassword == nil, "Encrypted password should delete")
+}
+
+func testCommandResultRedactsPasswords() throws {
+    let message = "mount_smbfs: mount error: //admin:ZN245107zn@192.168.10.1/%E5%B7%A5%E5%85%B7: No such file or directory"
+    let redacted = CommandResult.redacted(message, secrets: ["ZN245107zn"])
+    try expect(!redacted.contains("ZN245107zn"), "Command output should redact raw password")
+    try expect(redacted.contains("//admin:<redacted>@192.168.10.1"), "Command output should preserve useful host context")
+}
+
 func testMountPlanning() throws {
     let smb = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
     let smbPlan = try MountPlanner().mountPlan(for: smb, password: "secret")
@@ -217,6 +243,8 @@ let tests: [(String, () throws -> Void)] = [
     ("VolumeConfig JSON round trip", testVolumeConfigRoundTripsThroughJSON),
     ("ConfigStore save/load", testConfigStoreSaveLoadAndMissingFile),
     ("InMemoryCredentialStore", testInMemoryCredentialStore),
+    ("EncryptedFileCredentialStore", testEncryptedFileCredentialStore),
+    ("CommandResult redaction", testCommandResultRedactsPasswords),
     ("MountPlanning", testMountPlanning),
     ("ConnectivityPlanning", testConnectivityPlanning),
     ("AgentEngine decisions", testAgentEngineDecisions),
