@@ -7,7 +7,10 @@ public enum MountPlanningError: Error, Equatable {
 public struct MountPlanner {
     public init() {}
 
-    public func mountPlan(for config: VolumeConfig, password: String?) throws -> CommandPlan {
+    public func mountPlan(for config: VolumeConfig, password: String?, suppressesUserInterface: Bool = false) throws -> CommandPlan {
+        if suppressesUserInterface {
+            return try quietMountPlan(for: config, password: password)
+        }
         switch config.protocolType {
         case .smb:
             return try appleScriptMountPlan(url: urlString(scheme: "smb", config: config, includeUser: false), username: config.username, password: password)
@@ -20,23 +23,48 @@ public struct MountPlanner {
         }
     }
 
+    private func quietMountPlan(for config: VolumeConfig, password: String?) throws -> CommandPlan {
+        switch config.protocolType {
+        case .smb:
+            return CommandPlan(
+                executable: "/sbin/mount_smbfs",
+                arguments: ["-o", "nopassprompt", try smbFileSystemURL(config: config, password: password), config.mountPoint]
+            )
+        case .webdav:
+            return CommandPlan(
+                executable: "/sbin/mount_webdav",
+                arguments: ["-S", "-s", try webDAVURLString(config: config, includeUser: true, password: password), config.mountPoint]
+            )
+        case .afp:
+            return CommandPlan(
+                executable: "/sbin/mount_afp",
+                arguments: ["-s", try urlString(scheme: "afp", config: config, includeUser: true, password: password), config.mountPoint]
+            )
+        case .nfs:
+            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
+        }
+    }
+
     public func unmountPlan(mountPoint: String) -> CommandPlan {
         CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", mountPoint])
     }
 
-    private func urlString(scheme: String, config: VolumeConfig, includeUser: Bool = true) throws -> String {
+    private func urlString(scheme: String, config: VolumeConfig, includeUser: Bool = true, password: String? = nil) throws -> String {
         var components = URLComponents()
         components.scheme = scheme
         components.host = hostOnly(config.server)
         components.path = normalizedRemotePath(config.remotePath)
         if includeUser, let username = config.username, !username.isEmpty {
             components.user = username
+            if let password, !password.isEmpty {
+                components.password = password
+            }
         }
         guard let value = components.url?.absoluteString else { throw MountPlanningError.invalidURL }
         return value
     }
 
-    private func webDAVURLString(config: VolumeConfig, includeUser: Bool = true) throws -> String {
+    private func webDAVURLString(config: VolumeConfig, includeUser: Bool = true, password: String? = nil) throws -> String {
         let rawServer = config.server.trimmingCharacters(in: .whitespacesAndNewlines)
         let serverWithScheme = rawServer.contains("://") ? rawServer : "https://\(rawServer)"
         guard var components = URLComponents(string: serverWithScheme) else {
@@ -50,9 +78,29 @@ public struct MountPlanner {
         components.path = combinedPath.isEmpty ? "" : "/\(combinedPath)"
         if includeUser, let username = config.username, !username.isEmpty {
             components.user = username
+            if let password, !password.isEmpty {
+                components.password = password
+            }
         }
         guard let value = components.url?.absoluteString else { throw MountPlanningError.invalidURL }
         return value
+    }
+
+    private func smbFileSystemURL(config: VolumeConfig, password: String?) throws -> String {
+        let path = normalizedRemotePath(config.remotePath)
+        guard !path.isEmpty else { throw MountPlanningError.invalidURL }
+        var components = URLComponents()
+        components.scheme = "smb"
+        components.host = hostOnly(config.server)
+        components.path = path
+        if let username = config.username, !username.isEmpty {
+            components.user = username
+            if let password, !password.isEmpty {
+                components.password = password
+            }
+        }
+        guard let value = components.url?.absoluteString else { throw MountPlanningError.invalidURL }
+        return value.replacingOccurrences(of: "smb://", with: "//")
     }
 
     private func appleScriptMountPlan(url: String, username: String?, password: String?) throws -> CommandPlan {

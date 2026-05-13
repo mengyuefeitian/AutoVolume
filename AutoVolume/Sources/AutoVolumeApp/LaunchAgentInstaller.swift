@@ -38,8 +38,6 @@ enum LaunchAgentInstaller {
             </array>
             <key>RunAtLoad</key>
             <true/>
-            <key>KeepAlive</key>
-            <true/>
             <key>StandardOutPath</key>
             <string>/tmp/autovolume-agent.log</string>
             <key>StandardErrorPath</key>

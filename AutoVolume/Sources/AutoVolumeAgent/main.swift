@@ -4,11 +4,12 @@ import AutoVolumeShared
 let store = JSONConfigStore()
 let engine = AgentEngine(
     mountState: FileSystemMountStateProvider(),
-    credentialStore: KeychainCredentialStore(),
+    credentialStore: KeychainCredentialStore(allowsAuthenticationUI: false),
     commandRunner: ProcessCommandRunner(),
     mountPlanner: MountPlanner()
 )
 var scheduler = CheckScheduler()
+let alertStore = AlertStore()
 
 func runOnce() {
     let configs: [VolumeConfig]
@@ -28,8 +29,17 @@ func runOnce() {
         do {
             let status = try engine.check(config)
             scheduler.markChecked(volumeID: config.id, at: checkedDate(for: status, interval: config.checkIntervalSeconds, now: now))
+            switch status {
+            case .mounted:
+                try? alertStore.resolve(volumeID: config.id)
+            case .failed(let message):
+                try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
+            case .unmounted, .checking:
+                break
+            }
         } catch {
             scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, now: now))
+            try? alertStore.record(volumeID: config.id, volumeName: config.name, message: error.localizedDescription, date: now)
             fputs("AutoVolumeAgent mount error for \(config.name): \(error)\n", stderr)
         }
     }

@@ -32,13 +32,19 @@ public final class InMemoryCredentialStore: CredentialStore {
 
 public final class KeychainCredentialStore: CredentialStore {
     private let service = "com.autovolume.credentials"
+    private let allowsAuthenticationUI: Bool
 
-    public init() {}
+    public init(allowsAuthenticationUI: Bool = true) {
+        self.allowsAuthenticationUI = allowsAuthenticationUI
+    }
 
     public func password(for volumeID: UUID) throws -> String? {
         var query = baseQuery(for: volumeID)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if !allowsAuthenticationUI {
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        }
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -47,7 +53,9 @@ public final class KeychainCredentialStore: CredentialStore {
         guard let data = result as? Data, let password = String(data: data, encoding: .utf8) else {
             throw CredentialStoreError.invalidPasswordData
         }
-        try? refreshAccess(for: volumeID)
+        if allowsAuthenticationUI {
+            try? refreshAccess(for: volumeID)
+        }
         return password
     }
 

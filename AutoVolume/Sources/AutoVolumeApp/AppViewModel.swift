@@ -53,6 +53,9 @@ struct AppStrings {
     let working: String
     let testing: String
     let mounting: String
+    let alerts: String
+    let clearAlerts: String
+    let noAlerts: String
 
     static func values(for language: AppLanguage) -> AppStrings {
         switch language {
@@ -93,7 +96,10 @@ struct AppStrings {
                 smbAsyncReads: "Async directory reads",
                 working: "Working...",
                 testing: "Testing...",
-                mounting: "Mounting..."
+                mounting: "Mounting...",
+                alerts: "Alerts",
+                clearAlerts: "Clear",
+                noAlerts: "No alerts"
             )
         case .chinese:
             AppStrings(
@@ -132,7 +138,10 @@ struct AppStrings {
                 smbAsyncReads: "异步目录读取",
                 working: "处理中...",
                 testing: "测试中...",
-                mounting: "挂载中..."
+                mounting: "挂载中...",
+                alerts: "告警",
+                clearAlerts: "清空",
+                noAlerts: "暂无告警"
             )
         }
     }
@@ -141,6 +150,7 @@ struct AppStrings {
 @Observable
 public final class AppViewModel {
     public private(set) var volumes: [VolumeConfig] = []
+    public private(set) var alerts: [VolumeAlert] = []
     public var selectedVolumeID: VolumeConfig.ID?
     public var editorVolume: VolumeConfig?
     public var editorSessionID = UUID()
@@ -156,6 +166,7 @@ public final class AppViewModel {
     private let mountPlanner: MountPlanner
     private let connectivityTester: ConnectivityTester
     private let smbPreferencesWriter: SMBPreferencesWriter
+    private let alertStore: AlertStore
 
     private static let languageDefaultsKey = "AutoVolume.language"
 
@@ -165,7 +176,8 @@ public final class AppViewModel {
         commandRunner: CommandRunner = ProcessCommandRunner(),
         mountPlanner: MountPlanner = MountPlanner(),
         connectivityTester: ConnectivityTester = ConnectivityTester(),
-        smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter()
+        smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter(),
+        alertStore: AlertStore = AlertStore()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
@@ -173,7 +185,9 @@ public final class AppViewModel {
         self.mountPlanner = mountPlanner
         self.connectivityTester = connectivityTester
         self.smbPreferencesWriter = smbPreferencesWriter
+        self.alertStore = alertStore
         self.volumes = (try? configStore.load()) ?? []
+        self.alerts = (try? alertStore.load()) ?? []
         if let rawLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey),
            let savedLanguage = AppLanguage(rawValue: rawLanguage) {
             self.language = savedLanguage
@@ -229,6 +243,17 @@ public final class AppViewModel {
         volumes.removeAll { $0.id == config.id }
         try persist()
         try credentialStore.deletePassword(for: config.id)
+        try? alertStore.resolve(volumeID: config.id)
+        refreshAlerts()
+    }
+
+    public func refreshAlerts() {
+        alerts = (try? alertStore.load()) ?? []
+    }
+
+    public func clearAlerts() {
+        try? alertStore.clear()
+        refreshAlerts()
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
@@ -280,10 +305,12 @@ public final class AppViewModel {
             at: URL(fileURLWithPath: config.mountPoint),
             withIntermediateDirectories: true
         )
-        let result = try commandRunner.run(try mountPlanner.mountPlan(for: config, password: password))
+        let result = try commandRunner.run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
+        try? alertStore.resolve(volumeID: config.id)
+        refreshAlerts()
     }
 }
 

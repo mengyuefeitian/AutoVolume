@@ -21,6 +21,24 @@ struct ContentView: View {
                 }
                 .labelsHidden()
                 .frame(width: 92)
+                Menu {
+                    if viewModel.alerts.isEmpty {
+                        Text(viewModel.strings.noAlerts)
+                    } else {
+                        ForEach(viewModel.alerts) { alert in
+                            Text("\(alert.volumeName): \(alert.message)")
+                        }
+                        Divider()
+                        Button(viewModel.strings.clearAlerts) {
+                            viewModel.clearAlerts()
+                        }
+                    }
+                } label: {
+                    Label(viewModel.strings.alerts, systemImage: viewModel.alerts.isEmpty ? "bell" : "exclamationmark.triangle.fill")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(viewModel.alerts.isEmpty ? Color.secondary : Color.orange)
+                }
+                .help(viewModel.strings.alerts)
                 Button {
                     viewModel.beginAddingVolume()
                     openWindow(id: "volume-editor")
@@ -97,6 +115,12 @@ struct ContentView: View {
         }
         .padding(22)
         .background(.regularMaterial)
+        .onAppear {
+            viewModel.refreshAlerts()
+        }
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
+            viewModel.refreshAlerts()
+        }
     }
 
     private func bringEditorForward() {
@@ -127,6 +151,7 @@ struct ContentView: View {
             message = try await viewModel.mountAsync(volume)
         } catch {
             message = error.localizedDescription
+            viewModel.refreshAlerts()
         }
         workingVolumeIDs.remove(volume.id)
     }

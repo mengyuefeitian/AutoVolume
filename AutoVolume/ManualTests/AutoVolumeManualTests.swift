@@ -83,6 +83,9 @@ func testMountPlanning() throws {
     let smbNested = VolumeConfig(name: "Video", protocolType: .smb, server: "smb://nas.local/ignored", remotePath: "/video/projects", username: "mei", mountPoint: "/Volumes/Video", checkIntervalSeconds: 60, isEnabled: true)
     let smbNestedPlan = try MountPlanner().mountPlan(for: smbNested, password: "secret")
     try expect(smbNestedPlan.standardInput?.contains("smb://nas.local/video/projects") == true, "SMB mount should normalize host and remote subpath")
+    let quietSMBPlan = try MountPlanner().mountPlan(for: smbNested, password: "secret", suppressesUserInterface: true)
+    try expect(quietSMBPlan.executable == "/sbin/mount_smbfs", "Quiet SMB mount should avoid AppleScript")
+    try expect(quietSMBPlan.arguments.contains("nopassprompt"), "Quiet SMB mount should suppress password prompts")
 
     let nfs = VolumeConfig(name: "Exports", protocolType: .nfs, server: "nas.local", remotePath: "/exports/team", username: nil, mountPoint: "/Volumes/Exports", checkIntervalSeconds: 60, isEnabled: true)
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)
@@ -104,6 +107,8 @@ func testMountPlanning() throws {
     let webdavRoot = VolumeConfig(name: "RootDAV", protocolType: .webdav, server: "https://dav.example.com/base", remotePath: "/", username: "mei", mountPoint: "/Volumes/RootDAV", checkIntervalSeconds: 60, isEnabled: true)
     let webdavRootPlan = try MountPlanner().mountPlan(for: webdavRoot, password: "secret")
     try expect(webdavRootPlan.standardInput?.contains("https://dav.example.com/base") == true, "WebDAV / should mount the server/base root without an extra path level")
+    let quietWebDAVPlan = try MountPlanner().mountPlan(for: webdavRoot, password: "secret", suppressesUserInterface: true)
+    try expect(quietWebDAVPlan == CommandPlan(executable: "/sbin/mount_webdav", arguments: ["-S", "-s", "https://mei:secret@dav.example.com/base", "/Volumes/RootDAV"]), "Quiet WebDAV mount plan mismatch")
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
@@ -146,7 +151,7 @@ func testAgentEngineDecisions() throws {
     let unmountedEngine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: credentials, commandRunner: unmountedRunner, mountPlanner: MountPlanner())
     let unmountedStatus = try unmountedEngine.check(unmounted)
     try expect(unmountedStatus == .mounted, "Unmounted volume should mount successfully")
-    try expect(unmountedRunner.plans.first?.executable == "/usr/bin/osascript", "Unmounted volume should use macOS mount volume")
+    try expect(unmountedRunner.plans.first?.executable == "/sbin/mount_smbfs", "Agent should use quiet SMB mount")
 }
 
 func testCheckScheduler() throws {
@@ -157,6 +162,21 @@ func testCheckScheduler() throws {
     scheduler.markChecked(volumeID: id, at: Date(timeIntervalSince1970: 1_000))
     try expect(!scheduler.isDue(volumeID: id, interval: 300, now: Date(timeIntervalSince1970: 1_299)), "Volume should not be due before interval")
     try expect(scheduler.isDue(volumeID: id, interval: 300, now: Date(timeIntervalSince1970: 1_300)), "Volume should be due after interval")
+}
+
+func testAlertStore() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = AlertStore(directory: directory)
+    let id = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+
+    try store.record(volumeID: id, volumeName: "NAS", message: "Mount failed", date: Date(timeIntervalSince1970: 2_000))
+    let alerts = try store.load()
+    try expect(alerts == [VolumeAlert(volumeID: id, volumeName: "NAS", message: "Mount failed", date: Date(timeIntervalSince1970: 2_000))], "AlertStore should save alerts")
+
+    try store.resolve(volumeID: id)
+    let resolvedAlerts = try store.load()
+    try expect(resolvedAlerts == [], "AlertStore should resolve alerts")
 }
 
 struct FakeMountStateProvider: MountStateProvider {
@@ -185,7 +205,8 @@ let tests: [(String, () throws -> Void)] = [
     ("MountPlanning", testMountPlanning),
     ("ConnectivityPlanning", testConnectivityPlanning),
     ("AgentEngine decisions", testAgentEngineDecisions),
-    ("CheckScheduler", testCheckScheduler)
+    ("CheckScheduler", testCheckScheduler),
+    ("AlertStore", testAlertStore)
 ]
 
 do {
