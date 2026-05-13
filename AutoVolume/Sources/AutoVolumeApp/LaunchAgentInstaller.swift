@@ -24,6 +24,15 @@ enum LaunchAgentInstaller {
         }
     }
 
+    static func stop() {
+        let domain = "gui/\(getuid())"
+        guard let launchAgentsDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.appendingPathComponent("LaunchAgents", isDirectory: true) else {
+            return
+        }
+        let plistURL = launchAgentsDirectory.appendingPathComponent("\(label).plist")
+        _ = runLaunchctl(arguments: ["bootout", domain, plistURL.path])
+    }
+
     private static func plist(agentPath: String) -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>

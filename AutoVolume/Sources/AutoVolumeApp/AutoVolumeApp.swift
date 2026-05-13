@@ -1,8 +1,16 @@
 import SwiftUI
+import AppKit
 import AutoVolumeShared
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        LaunchAgentInstaller.stop()
+    }
+}
 
 @main
 struct AutoVolumeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var viewModel = AppViewModel()
 
     init() {
