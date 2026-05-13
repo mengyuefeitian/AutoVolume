@@ -99,6 +99,13 @@ func testCommandResultRedactsPasswords() throws {
     try expect(redacted.contains("//admin:<redacted>@192.168.10.1"), "Command output should preserve useful host context")
 }
 
+func testSMBDialectPreferences() throws {
+    try expect(SMBDialect.smb2.protocolVersionMap == 2, "SMB2 mode should not allow SMB1")
+    try expect(SMBDialect.smb2LargeMTU.protocolVersionMap == 6, "SMB2 + Large MTU mode should allow SMB2 through SMB3")
+    try expect(SMBDialect.smb3.protocolVersionMap == 6, "Default SMB mode should auto-negotiate SMB2 through SMB3")
+    try expect(SMBDialect.smb3.displayName.contains("SMB2-SMB3"), "Default SMB display should make the auto range clear")
+}
+
 func testMountPlanning() throws {
     let smb = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
     let smbPlan = try MountPlanner().mountPlan(for: smb, password: "secret")
@@ -323,6 +330,7 @@ let tests: [(String, () throws -> Void)] = [
     ("InMemoryCredentialStore", testInMemoryCredentialStore),
     ("EncryptedFileCredentialStore", testEncryptedFileCredentialStore),
     ("CommandResult redaction", testCommandResultRedactsPasswords),
+    ("SMB dialect preferences", testSMBDialectPreferences),
     ("MountPlanning", testMountPlanning),
     ("ConnectivityPlanning", testConnectivityPlanning),
     ("MountExposure", testMountExposureCreatesSubdirectoryLink),

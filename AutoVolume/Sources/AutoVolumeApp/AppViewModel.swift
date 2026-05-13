@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Observation
 import AutoVolumeShared
 
@@ -91,7 +92,7 @@ struct AppStrings {
                 showPassword: "Show password",
                 hidePassword: "Hide password",
                 testReachabilitySucceeded: "Server is reachable. Credentials are verified during mount.",
-                smbDialect: "SMB Mode",
+                smbDialect: "SMB Range",
                 smbMultichannel: "SMB3 Multichannel",
                 smbAsyncReads: "Async directory reads",
                 working: "Working...",
@@ -133,7 +134,7 @@ struct AppStrings {
                 showPassword: "显示密码",
                 hidePassword: "隐藏密码",
                 testReachabilitySucceeded: "服务器可达。账号密码会在挂载时验证。",
-                smbDialect: "SMB 模式",
+                smbDialect: "SMB 范围",
                 smbMultichannel: "SMB3 多通道",
                 smbAsyncReads: "异步目录读取",
                 working: "处理中...",
@@ -303,6 +304,7 @@ public final class AppViewModel {
             try smbPreferencesWriter.apply(options: config.smbOptions)
         }
         try runMountCommand(for: config, password: storedPassword)
+        openMountedVolume(config)
         return strings.mountSucceeded
     }
 
@@ -367,6 +369,13 @@ public final class AppViewModel {
         try mountExposure.expose(config: config, planner: mountPlanner)
         try? alertStore.resolve(volumeID: config.id)
         refreshAlerts()
+    }
+
+    private func openMountedVolume(_ config: VolumeConfig) {
+        let url = URL(fileURLWithPath: config.mountPoint, isDirectory: true)
+        DispatchQueue.main.async {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func runMountWithRecovery(for config: VolumeConfig, password: String?) throws -> CommandResult {

@@ -41,6 +41,9 @@ func runOnce() {
             let status: VolumeStatus
             if networkFailedVolumeIDs.contains(config.id) {
                 status = try engine.reconnect(config)
+                if status == .mounted {
+                    openMountedVolume(config)
+                }
             } else {
                 status = try engine.check(config)
             }
@@ -68,6 +71,11 @@ func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
     let plan = try connectivityTester.testPlan(for: config, password: password)
     let result = try commandRunner.run(plan).redacting(secrets: [password])
     return result.exitCode == 0
+}
+
+func openMountedVolume(_ config: VolumeConfig) {
+    let plan = CommandPlan(executable: "/usr/bin/open", arguments: [config.mountPoint])
+    _ = try? commandRunner.run(plan)
 }
 
 func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) -> Date {

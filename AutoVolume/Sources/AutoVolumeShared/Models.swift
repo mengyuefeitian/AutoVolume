@@ -100,14 +100,16 @@ public enum SMBDialect: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .smb2: "SMB2"
         case .smb2LargeMTU: "SMB2 + Large MTU"
-        case .smb3: "SMB3"
+        case .smb3: "Auto (SMB2-SMB3)"
         }
     }
 
     public var protocolVersionMap: Int {
         switch self {
-        case .smb2, .smb2LargeMTU: 6
-        case .smb3: 4
+        case .smb2:
+            2
+        case .smb2LargeMTU, .smb3:
+            6
         }
     }
 }
