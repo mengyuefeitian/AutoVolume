@@ -51,7 +51,7 @@ func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) ->
         return now
     case .unmounted, .checking, .failed:
         if case .failed(let message) = status, isNetworkFailure(message) {
-            return retryCheckedDate(interval: interval, retryInterval: 15, now: now)
+            return retryCheckedDate(interval: interval, retryInterval: 60, now: now)
         }
         return now
     }
@@ -59,7 +59,7 @@ func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) ->
 
 func checkedDate(for error: Error, interval: TimeInterval, now: Date) -> Date {
     if isNetworkFailure(error.localizedDescription) {
-        return retryCheckedDate(interval: interval, retryInterval: 15, now: now)
+        return retryCheckedDate(interval: interval, retryInterval: 60, now: now)
     }
     return now
 }
