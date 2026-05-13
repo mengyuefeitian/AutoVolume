@@ -59,6 +59,7 @@ swiftc \
   -Xlinker @executable_path/../Frameworks \
   -o "$BUILD/AutoVolumeApp" \
   Sources/AutoVolumeApp/AutoVolumeApp.swift \
+  Sources/AutoVolumeApp/LaunchAgentInstaller.swift \
   Sources/AutoVolumeApp/AppViewModel.swift \
   Sources/AutoVolumeApp/ContentView.swift \
   Sources/AutoVolumeApp/VolumeEditorView.swift

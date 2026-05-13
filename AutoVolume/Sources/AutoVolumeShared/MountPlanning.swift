@@ -16,7 +16,7 @@ public struct MountPlanner {
         case .afp:
             return try appleScriptMountPlan(url: urlString(scheme: "afp", config: config, includeUser: false), username: config.username, password: password)
         case .nfs:
-            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["\(config.server):\(config.remotePath)", config.mountPoint])
+            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
         }
     }
 
@@ -85,6 +85,11 @@ public struct MountPlanner {
             .replacingOccurrences(of: "\\", with: "/")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return normalized.isEmpty ? "" : "/\(normalized)"
+    }
+
+    private func nfsRemotePath(_ path: String) -> String {
+        let normalized = normalizedRemotePath(path)
+        return normalized.isEmpty ? "/" : normalized
     }
 
     private func hostOnly(_ server: String) -> String {

@@ -88,6 +88,14 @@ func testMountPlanning() throws {
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)
     try expect(nfsPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["nas.local:/exports/team", "/Volumes/Exports"]), "NFS mount plan mismatch")
 
+    let nfsURLServer = VolumeConfig(name: "NFS Media", protocolType: .nfs, server: "nfs://nas.local/ignored", remotePath: "exports/media", username: nil, mountPoint: "/Volumes/Media", checkIntervalSeconds: 60, isEnabled: true)
+    let nfsURLServerPlan = try MountPlanner().mountPlan(for: nfsURLServer, password: nil)
+    try expect(nfsURLServerPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["nas.local:/exports/media", "/Volumes/Media"]), "NFS should normalize server and remote subpath")
+
+    let afp = VolumeConfig(name: "AFP Media", protocolType: .afp, server: "afp://nas.local/root", remotePath: "/media/projects", username: "mei", mountPoint: "/Volumes/AFPMedia", checkIntervalSeconds: 60, isEnabled: true)
+    let afpPlan = try MountPlanner().mountPlan(for: afp, password: "secret")
+    try expect(afpPlan.standardInput?.contains("afp://nas.local/media/projects") == true, "AFP should normalize host and remote subpath")
+
     let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "dav.example.com", remotePath: "remote.php/dav/files/mei", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 60, isEnabled: true)
     let webdavPlan = try MountPlanner().mountPlan(for: webdav, password: "secret")
     try expect(webdavPlan.executable == "/usr/bin/osascript", "WebDAV mount should use AppleScript")
@@ -109,6 +117,10 @@ func testConnectivityPlanning() throws {
     let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "https://dav.example.com", remotePath: "remote.php/dav/files/mei", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 60, isEnabled: true)
     let webdavPlan = try ConnectivityTester().testPlan(for: webdav, password: "secret")
     try expect(webdavPlan == CommandPlan(executable: "/usr/bin/curl", arguments: ["--user", "mei:secret", "--head", "--location", "--max-time", "10", "https://dav.example.com/remote.php/dav/files/mei"]), "WebDAV connectivity plan mismatch")
+
+    let webdavBackslash = VolumeConfig(name: "DAVSlash", protocolType: .webdav, server: "https://dav.example.com/base", remotePath: "\\team\\video", username: nil, mountPoint: "/Volumes/DAVSlash", checkIntervalSeconds: 60, isEnabled: true)
+    let webdavBackslashPlan = try ConnectivityTester().testPlan(for: webdavBackslash, password: nil)
+    try expect(webdavBackslashPlan.arguments.last == "https://dav.example.com/base/team/video", "WebDAV connectivity should normalize backslashes")
 }
 
 func testAgentEngineDecisions() throws {

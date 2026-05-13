@@ -27,7 +27,9 @@ public struct ConnectivityTester {
             throw MountPlanningError.invalidURL
         }
         let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let remotePath = config.remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let remotePath = config.remotePath
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let combinedPath = [basePath, remotePath].filter { !$0.isEmpty }.joined(separator: "/")
         components.path = combinedPath.isEmpty ? "" : "/\(combinedPath)"
         guard let value = components.url?.absoluteString else { throw MountPlanningError.invalidURL }

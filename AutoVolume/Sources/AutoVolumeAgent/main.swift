@@ -11,19 +11,42 @@ let engine = AgentEngine(
 var scheduler = CheckScheduler()
 
 func runOnce() {
+    let configs: [VolumeConfig]
     do {
-        let configs = try store.load()
-        let now = Date()
-        for config in configs where config.isEnabled {
-            guard scheduler.isDue(volumeID: config.id, interval: config.checkIntervalSeconds, now: now) else {
-                continue
-            }
-            _ = try engine.check(config)
-            scheduler.markChecked(volumeID: config.id, at: now)
-        }
+        configs = try store.load()
     } catch {
-        fputs("AutoVolumeAgent error: \(error)\n", stderr)
+        fputs("AutoVolumeAgent config error: \(error)\n", stderr)
+        return
     }
+
+    let now = Date()
+    for config in configs where config.isEnabled {
+        guard scheduler.isDue(volumeID: config.id, interval: config.checkIntervalSeconds, now: now) else {
+            continue
+        }
+
+        do {
+            let status = try engine.check(config)
+            scheduler.markChecked(volumeID: config.id, at: checkedDate(for: status, interval: config.checkIntervalSeconds, now: now))
+        } catch {
+            scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, now: now))
+            fputs("AutoVolumeAgent mount error for \(config.name): \(error)\n", stderr)
+        }
+    }
+}
+
+func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) -> Date {
+    switch status {
+    case .mounted:
+        return now
+    case .unmounted, .checking, .failed:
+        return retryCheckedDate(interval: interval, now: now)
+    }
+}
+
+func retryCheckedDate(interval: TimeInterval, now: Date) -> Date {
+    let retryInterval = min(interval, 60)
+    return now.addingTimeInterval(retryInterval - interval)
 }
 
 let timer = Timer(timeInterval: 15, repeats: true) { _ in

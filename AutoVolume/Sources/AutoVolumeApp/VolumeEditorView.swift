@@ -247,10 +247,12 @@ private struct FloatingWindowAccessor: NSViewRepresentable {
         let view = NSView()
         DispatchQueue.main.async {
             guard let window = view.window else { return }
+            window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
             window.level = .floating
             window.collectionBehavior.insert(.fullScreenAuxiliary)
             window.isReleasedWhenClosed = false
             NSApp.activate(ignoringOtherApps: true)
+            window.orderFrontRegardless()
             window.makeKeyAndOrderFront(nil)
         }
         return view
@@ -259,8 +261,10 @@ private struct FloatingWindowAccessor: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
             guard let window = nsView.window else { return }
+            window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
             window.level = .floating
             NSApp.activate(ignoringOtherApps: true)
+            window.orderFrontRegardless()
             window.makeKeyAndOrderFront(nil)
         }
     }

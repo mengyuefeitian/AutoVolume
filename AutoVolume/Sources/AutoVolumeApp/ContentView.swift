@@ -100,9 +100,22 @@ struct ContentView: View {
     }
 
     private func bringEditorForward() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        [0.05, 0.2, 0.45].forEach { delay in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                focusEditorWindow()
+            }
+        }
+    }
+
+    private func focusEditorWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        let editorWindow = NSApp.windows.first { $0.identifier?.rawValue == "volume-editor" }
+        if let editorWindow {
+            editorWindow.level = .floating
+            editorWindow.orderFrontRegardless()
+            editorWindow.makeKeyAndOrderFront(nil)
+        } else {
             NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first { $0.identifier?.rawValue == "volume-editor" }?.makeKeyAndOrderFront(nil)
         }
     }
 
