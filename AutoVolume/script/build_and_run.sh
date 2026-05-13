@@ -25,6 +25,7 @@ swiftc \
   Sources/AutoVolumeShared/CredentialStore.swift \
   Sources/AutoVolumeShared/CommandRunner.swift \
   Sources/AutoVolumeShared/MountPlanning.swift \
+  Sources/AutoVolumeShared/MountExposure.swift \
   Sources/AutoVolumeShared/MountState.swift \
   Sources/AutoVolumeShared/AgentEngine.swift \
   Sources/AutoVolumeShared/CheckScheduler.swift \

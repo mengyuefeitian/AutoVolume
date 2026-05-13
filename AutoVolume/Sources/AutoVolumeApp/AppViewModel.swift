@@ -169,6 +169,7 @@ public final class AppViewModel {
     private let smbPreferencesWriter: SMBPreferencesWriter
     private let alertStore: AlertStore
     private let mountStateProvider: MountStateProvider
+    private let mountExposure: MountExposure
 
     private static let languageDefaultsKey = "AutoVolume.language"
 
@@ -180,7 +181,8 @@ public final class AppViewModel {
         connectivityTester: ConnectivityTester = ConnectivityTester(),
         smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter(),
         alertStore: AlertStore = AlertStore(),
-        mountStateProvider: MountStateProvider = FileSystemMountStateProvider()
+        mountStateProvider: MountStateProvider = FileSystemMountStateProvider(),
+        mountExposure: MountExposure = MountExposure()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
@@ -190,6 +192,7 @@ public final class AppViewModel {
         self.smbPreferencesWriter = smbPreferencesWriter
         self.alertStore = alertStore
         self.mountStateProvider = mountStateProvider
+        self.mountExposure = mountExposure
         self.volumes = (try? configStore.load()) ?? []
         self.alerts = (try? alertStore.load()) ?? []
         if let rawLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey),
@@ -356,16 +359,14 @@ public final class AppViewModel {
     }
 
     private func runMountCommand(for config: VolumeConfig, password: String?) throws {
-        try FileManager.default.createDirectory(
-            at: URL(fileURLWithPath: config.mountPoint),
-            withIntermediateDirectories: true
-        )
+        try mountExposure.prepare(config: config, planner: mountPlanner)
         let result = try commandRunner
             .run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
             .redacting(secrets: [password])
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
+        try mountExposure.expose(config: config, planner: mountPlanner)
         try? alertStore.resolve(volumeID: config.id)
         refreshAlerts()
     }

@@ -112,6 +112,8 @@ func testMountPlanning() throws {
     let quietSMBPlan = try MountPlanner().mountPlan(for: smbNested, password: "secret", suppressesUserInterface: true)
     try expect(quietSMBPlan.executable == "/sbin/mount_smbfs", "Quiet SMB mount should avoid AppleScript")
     try expect(quietSMBPlan.arguments.contains("nopassprompt"), "Quiet SMB mount should suppress password prompts")
+    try expect(quietSMBPlan.arguments.contains("//mei:secret@nas.local/video"), "Quiet SMB mount should mount the share only")
+    try expect(MountPlanner().exposedPathTarget(for: smbNested)?.hasSuffix("/projects") == true, "Nested SMB mount should expose the subdirectory")
 
     let nfs = VolumeConfig(name: "Exports", protocolType: .nfs, server: "nas.local", remotePath: "/exports/team", username: nil, mountPoint: "/Volumes/Exports", checkIntervalSeconds: 60, isEnabled: true)
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)
@@ -152,6 +154,33 @@ func testConnectivityPlanning() throws {
     let webdavBackslash = VolumeConfig(name: "DAVSlash", protocolType: .webdav, server: "https://dav.example.com/base", remotePath: "\\team\\video", username: nil, mountPoint: "/Volumes/DAVSlash", checkIntervalSeconds: 60, isEnabled: true)
     let webdavBackslashPlan = try ConnectivityTester().testPlan(for: webdavBackslash, password: nil)
     try expect(webdavBackslashPlan.arguments.last == "https://dav.example.com/base/team/video", "WebDAV connectivity should normalize backslashes")
+}
+
+func testMountExposureCreatesSubdirectoryLink() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let config = VolumeConfig(
+        id: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
+        name: "Tools",
+        protocolType: .smb,
+        server: "192.168.10.1",
+        remotePath: "sda1/工具",
+        username: "admin",
+        mountPoint: directory.appendingPathComponent("Tools").path,
+        checkIntervalSeconds: 60,
+        isEnabled: true
+    )
+    let planner = MountPlanner()
+    let exposure = MountExposure()
+
+    try exposure.prepare(config: config, planner: planner)
+    let target = planner.exposedPathTarget(for: config)!
+    try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
+    try exposure.expose(config: config, planner: planner)
+
+    let destination = try FileManager.default.destinationOfSymbolicLink(atPath: config.mountPoint)
+    try expect(destination == target, "Nested SMB exposure should point the visible mount entry at the configured subdirectory")
 }
 
 func testAgentEngineDecisions() throws {
@@ -247,6 +276,7 @@ let tests: [(String, () throws -> Void)] = [
     ("CommandResult redaction", testCommandResultRedactsPasswords),
     ("MountPlanning", testMountPlanning),
     ("ConnectivityPlanning", testConnectivityPlanning),
+    ("MountExposure", testMountExposureCreatesSubdirectoryLink),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
     ("CheckScheduler", testCheckScheduler),

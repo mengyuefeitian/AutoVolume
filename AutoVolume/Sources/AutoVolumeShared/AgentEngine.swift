@@ -5,17 +5,20 @@ public final class AgentEngine {
     private let credentialStore: CredentialStore
     private let commandRunner: CommandRunner
     private let mountPlanner: MountPlanner
+    private let mountExposure: MountExposure
 
     public init(
         mountState: MountStateProvider,
         credentialStore: CredentialStore,
         commandRunner: CommandRunner,
-        mountPlanner: MountPlanner
+        mountPlanner: MountPlanner,
+        mountExposure: MountExposure = MountExposure()
     ) {
         self.mountState = mountState
         self.credentialStore = credentialStore
         self.commandRunner = commandRunner
         self.mountPlanner = mountPlanner
+        self.mountExposure = mountExposure
     }
 
     public func check(_ config: VolumeConfig) throws -> VolumeStatus {
@@ -23,14 +26,12 @@ public final class AgentEngine {
         if mountState.isMounted(config: config) { return .mounted }
 
         let password = try credentialStore.password(for: config.id)
-        try FileManager.default.createDirectory(
-            at: URL(fileURLWithPath: config.mountPoint),
-            withIntermediateDirectories: true
-        )
+        try mountExposure.prepare(config: config, planner: mountPlanner)
         let result = try commandRunner
             .run(try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true))
             .redacting(secrets: [password])
         if result.exitCode == 0 {
+            try mountExposure.expose(config: config, planner: mountPlanner)
             return .mounted
         }
         let message = result.stderr.isEmpty ? "Mount command failed with exit code \(result.exitCode)." : result.stderr

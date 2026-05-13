@@ -58,6 +58,9 @@ public struct SystemMountTable {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             .lowercased()
         if remotePath.isEmpty { return true }
+        if config.protocolType == .smb, let share = remotePath.split(separator: "/").first {
+            return lowercasedLine.contains("/\(share)")
+        }
         return lowercasedLine.contains("/\(remotePath)")
     }
 
