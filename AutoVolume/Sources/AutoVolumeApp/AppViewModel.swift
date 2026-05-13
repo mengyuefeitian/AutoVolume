@@ -151,6 +151,7 @@ struct AppStrings {
 public final class AppViewModel {
     public private(set) var volumes: [VolumeConfig] = []
     public private(set) var alerts: [VolumeAlert] = []
+    public private(set) var volumeStatuses: [VolumeConfig.ID: VolumeStatus] = [:]
     public var selectedVolumeID: VolumeConfig.ID?
     public var editorVolume: VolumeConfig?
     public var editorSessionID = UUID()
@@ -167,6 +168,7 @@ public final class AppViewModel {
     private let connectivityTester: ConnectivityTester
     private let smbPreferencesWriter: SMBPreferencesWriter
     private let alertStore: AlertStore
+    private let mountStateProvider: MountStateProvider
 
     private static let languageDefaultsKey = "AutoVolume.language"
 
@@ -177,7 +179,8 @@ public final class AppViewModel {
         mountPlanner: MountPlanner = MountPlanner(),
         connectivityTester: ConnectivityTester = ConnectivityTester(),
         smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter(),
-        alertStore: AlertStore = AlertStore()
+        alertStore: AlertStore = AlertStore(),
+        mountStateProvider: MountStateProvider = FileSystemMountStateProvider()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
@@ -186,6 +189,7 @@ public final class AppViewModel {
         self.connectivityTester = connectivityTester
         self.smbPreferencesWriter = smbPreferencesWriter
         self.alertStore = alertStore
+        self.mountStateProvider = mountStateProvider
         self.volumes = (try? configStore.load()) ?? []
         self.alerts = (try? alertStore.load()) ?? []
         if let rawLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey),
@@ -196,6 +200,8 @@ public final class AppViewModel {
         } else {
             self.language = .english
         }
+        migrateLegacyMountPoints()
+        refreshVolumeStatuses()
     }
 
     var strings: AppStrings { AppStrings.values(for: language) }
@@ -225,6 +231,7 @@ public final class AppViewModel {
         if config.protocolType == .smb {
             try smbPreferencesWriter.apply(options: config.smbOptions)
         }
+        refreshVolumeStatuses()
     }
 
     public func save(_ config: VolumeConfig, password: String?) throws {
@@ -237,6 +244,7 @@ public final class AppViewModel {
         if let password, !password.isEmpty {
             try credentialStore.savePassword(password, for: config.id)
         }
+        refreshVolumeStatuses()
     }
 
     public func delete(_ config: VolumeConfig) throws {
@@ -249,11 +257,26 @@ public final class AppViewModel {
 
     public func refreshAlerts() {
         alerts = (try? alertStore.load()) ?? []
+        refreshVolumeStatuses()
     }
 
     public func clearAlerts() {
         try? alertStore.clear()
         refreshAlerts()
+    }
+
+    public func refreshVolumeStatuses() {
+        var statuses: [VolumeConfig.ID: VolumeStatus] = [:]
+        for volume in volumes {
+            if mountStateProvider.isMounted(config: volume) {
+                statuses[volume.id] = .mounted
+            } else if let alert = alerts.first(where: { $0.volumeID == volume.id }) {
+                statuses[volume.id] = .failed(message: alert.message)
+            } else {
+                statuses[volume.id] = .unmounted
+            }
+        }
+        volumeStatuses = statuses
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
@@ -298,6 +321,37 @@ public final class AppViewModel {
 
     private func persist() throws {
         try configStore.save(volumes)
+    }
+
+    private func migrateLegacyMountPoints() {
+        let root = Self.defaultMountRoot
+        var didChange = false
+        for index in volumes.indices {
+            let mountPoint = volumes[index].mountPoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            if mountPoint == root || mountPoint == root + "/" {
+                volumes[index].mountPoint = Self.defaultMountPoint(for: volumes[index].name)
+                didChange = true
+            }
+        }
+        if didChange {
+            try? persist()
+        }
+    }
+
+    private static var defaultMountRoot: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Volumes", isDirectory: true)
+            .path
+    }
+
+    public static func defaultMountPoint(for name: String) -> String {
+        let fallback = "AutoVolume"
+        let sanitizedName = name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+        return URL(fileURLWithPath: defaultMountRoot)
+            .appendingPathComponent(sanitizedName.isEmpty ? fallback : sanitizedName, isDirectory: true)
+            .path
     }
 
     private func runMountCommand(for config: VolumeConfig, password: String?) throws {

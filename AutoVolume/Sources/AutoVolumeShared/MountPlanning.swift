@@ -1,7 +1,14 @@
 import Foundation
 
-public enum MountPlanningError: Error, Equatable {
+public enum MountPlanningError: Error, Equatable, LocalizedError {
     case invalidURL
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            "Invalid remote path. SMB requires a share name, for example sda1 or video."
+        }
+    }
 }
 
 public struct MountPlanner {

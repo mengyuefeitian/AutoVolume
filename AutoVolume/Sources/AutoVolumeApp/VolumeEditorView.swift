@@ -14,7 +14,7 @@ struct VolumeEditorView: View {
     @State private var remotePath = ""
     @State private var username = ""
     @State private var password = ""
-    @State private var mountPoint = Self.defaultMountRoot
+    @State private var mountPoint = AppViewModel.defaultMountPoint(for: "")
     @State private var intervalMinutes = 5.0
     @State private var smbDialect = SMBDialect.smb3
     @State private var isSMBMultichannelEnabled = true
@@ -40,7 +40,7 @@ struct VolumeEditorView: View {
         _remotePath = State(initialValue: volume?.remotePath ?? "")
         _username = State(initialValue: volume?.username ?? "")
         _password = State(initialValue: viewModel.password(for: volume))
-        _mountPoint = State(initialValue: volume?.mountPoint ?? Self.defaultMountRoot)
+        _mountPoint = State(initialValue: volume?.mountPoint ?? AppViewModel.defaultMountPoint(for: volume?.name ?? ""))
         _intervalMinutes = State(initialValue: max(1, (volume?.checkIntervalSeconds ?? 300) / 60))
         _smbDialect = State(initialValue: volume?.smbOptions.dialect ?? .smb3)
         _isSMBMultichannelEnabled = State(initialValue: volume?.smbOptions.isMultichannelEnabled ?? true)
@@ -207,7 +207,7 @@ struct VolumeEditorView: View {
             server: server,
             remotePath: remotePath,
             username: username.isEmpty ? nil : username,
-            mountPoint: mountPoint,
+            mountPoint: resolvedMountPoint(),
             checkIntervalSeconds: intervalMinutes * 60,
             isEnabled: true,
             smbOptions: SMBOptions(
@@ -218,10 +218,15 @@ struct VolumeEditorView: View {
         )
     }
 
-    private static var defaultMountRoot: String {
-        FileManager.default.homeDirectoryForCurrentUser
+    private func resolvedMountPoint() -> String {
+        let trimmedMountPoint = mountPoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyRoot = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Volumes", isDirectory: true)
-            .path + "/"
+            .path
+        if trimmedMountPoint.isEmpty || trimmedMountPoint == legacyRoot || trimmedMountPoint == legacyRoot + "/" || trimmedMountPoint == AppViewModel.defaultMountPoint(for: "") {
+            return AppViewModel.defaultMountPoint(for: name)
+        }
+        return trimmedMountPoint
     }
 
     @MainActor

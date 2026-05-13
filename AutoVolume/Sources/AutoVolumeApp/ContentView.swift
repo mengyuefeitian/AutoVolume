@@ -55,7 +55,8 @@ struct ContentView: View {
             } else {
                 List(viewModel.volumes) { volume in
                     HStack(spacing: 12) {
-                        Image(systemName: "externaldrive")
+                        Image(systemName: statusIcon(for: volume))
+                            .foregroundStyle(statusColor(for: volume))
                         VStack(alignment: .leading) {
                             Text(volume.name).font(.headline)
                             Text("\(volume.protocolType.rawValue.uppercased()) · \(volume.server)/\(volume.remotePath)")
@@ -140,6 +141,28 @@ struct ContentView: View {
             editorWindow.makeKeyAndOrderFront(nil)
         } else {
             NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func statusIcon(for volume: VolumeConfig) -> String {
+        switch viewModel.volumeStatuses[volume.id] {
+        case .mounted:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "xmark.octagon.fill"
+        default:
+            return "circle"
+        }
+    }
+
+    private func statusColor(for volume: VolumeConfig) -> Color {
+        switch viewModel.volumeStatuses[volume.id] {
+        case .mounted:
+            return .green
+        case .failed:
+            return .red
+        default:
+            return .secondary
         }
     }
 

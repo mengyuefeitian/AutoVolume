@@ -154,6 +154,21 @@ func testAgentEngineDecisions() throws {
     try expect(unmountedRunner.plans.first?.executable == "/sbin/mount_smbfs", "Agent should use quiet SMB mount")
 }
 
+func testSystemMountTableMatchesServerMounts() throws {
+    let output = """
+    //admin@192.168.10.1/sda1 on /Volumes/sda1 (smbfs, nodev, nosuid, mounted by xiaoan)
+    https://mei@example.com/dav/files on /Volumes/DAV (webdav, nodev, nosuid, mounted by xiaoan)
+    """
+    let smb = VolumeConfig(name: "Router", protocolType: .smb, server: "192.168.10.1", remotePath: "", username: "admin", mountPoint: "/Users/xiaoan/Volumes/", checkIntervalSeconds: 240, isEnabled: true)
+    let smbShare = VolumeConfig(name: "RouterShare", protocolType: .smb, server: "smb://192.168.10.1", remotePath: "sda1", username: "admin", mountPoint: "/Users/xiaoan/Volumes/", checkIntervalSeconds: 240, isEnabled: true)
+    let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "https://example.com", remotePath: "dav/files", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 240, isEnabled: true)
+    let table = SystemMountTable(mountOutput: output)
+
+    try expect(table.contains(config: smb), "Empty SMB remote path should match an existing server mount")
+    try expect(table.contains(config: smbShare), "SMB remote share should match an existing share mount")
+    try expect(table.contains(config: webdav), "WebDAV path should match an existing WebDAV mount")
+}
+
 func testCheckScheduler() throws {
     let id = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
     var scheduler = CheckScheduler()
@@ -205,6 +220,7 @@ let tests: [(String, () throws -> Void)] = [
     ("MountPlanning", testMountPlanning),
     ("ConnectivityPlanning", testConnectivityPlanning),
     ("AgentEngine decisions", testAgentEngineDecisions),
+    ("SystemMountTable", testSystemMountTableMatchesServerMounts),
     ("CheckScheduler", testCheckScheduler),
     ("AlertStore", testAlertStore)
 ]

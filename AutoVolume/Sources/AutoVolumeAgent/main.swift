@@ -38,7 +38,7 @@ func runOnce() {
                 break
             }
         } catch {
-            scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, now: now))
+            scheduler.markChecked(volumeID: config.id, at: checkedDate(for: error, interval: config.checkIntervalSeconds, now: now))
             try? alertStore.record(volumeID: config.id, volumeName: config.name, message: error.localizedDescription, date: now)
             fputs("AutoVolumeAgent mount error for \(config.name): \(error)\n", stderr)
         }
@@ -50,13 +50,40 @@ func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) ->
     case .mounted:
         return now
     case .unmounted, .checking, .failed:
-        return retryCheckedDate(interval: interval, now: now)
+        if case .failed(let message) = status, isNetworkFailure(message) {
+            return retryCheckedDate(interval: interval, retryInterval: 15, now: now)
+        }
+        return now
     }
 }
 
-func retryCheckedDate(interval: TimeInterval, now: Date) -> Date {
-    let retryInterval = min(interval, 60)
+func checkedDate(for error: Error, interval: TimeInterval, now: Date) -> Date {
+    if isNetworkFailure(error.localizedDescription) {
+        return retryCheckedDate(interval: interval, retryInterval: 15, now: now)
+    }
+    return now
+}
+
+func retryCheckedDate(interval: TimeInterval, retryInterval: TimeInterval, now: Date) -> Date {
     return now.addingTimeInterval(retryInterval - interval)
+}
+
+func isNetworkFailure(_ message: String) -> Bool {
+    let normalized = message.lowercased()
+    return [
+        "network is down",
+        "network is unreachable",
+        "no route to host",
+        "host is down",
+        "timed out",
+        "timeout",
+        "could not connect",
+        "couldn't connect",
+        "connection refused",
+        "connection reset",
+        "not responding",
+        "server unavailable"
+    ].contains { normalized.contains($0) }
 }
 
 let timer = Timer(timeInterval: 15, repeats: true) { _ in
