@@ -1,3 +1,23 @@
+# AutoVolume 0.1.22 Release Notes
+
+AutoVolume 0.1.22 fixes duplicate Finder windows after a successful mount.
+
+## Fixes
+
+- Opens only one Finder window after mounting or reconnecting a volume.
+- Keeps the Finder target behavior from 0.1.21, including opening nested SMB folders directly.
+
+## Assets
+
+- `AutoVolume-0.1.22-local.dmg`
+- `AutoVolume-0.1.22-local.zip`
+
+## Notes
+
+This build is ad-hoc signed for local testing and is not notarized with Developer ID. macOS may show privacy or security prompts on first launch.
+
+---
+
 # AutoVolume 0.1.21 Release Notes
 
 AutoVolume 0.1.21 fixes HTTPS WebDAV mounting on macOS by avoiding `mount_webdav` userinfo URLs and using the same AppleScript mounting path as Finder.

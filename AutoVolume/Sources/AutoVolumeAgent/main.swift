@@ -82,7 +82,6 @@ func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
 func openMountedVolume(_ config: VolumeConfig) {
     let browsePath = mountPlanner.browsePath(for: config)
     Thread.sleep(forTimeInterval: 0.6)
-    _ = try? commandRunner.run(CommandPlan(executable: "/usr/bin/open", arguments: ["-a", "Finder", browsePath]))
     let script = """
     tell application "Finder"
         activate
