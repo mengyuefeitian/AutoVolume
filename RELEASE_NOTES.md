@@ -1,3 +1,24 @@
+# AutoVolume 0.1.21 Release Notes
+
+AutoVolume 0.1.21 fixes HTTPS WebDAV mounting on macOS by avoiding `mount_webdav` userinfo URLs and using the same AppleScript mounting path as Finder.
+
+## Fixes
+
+- Fixes WebDAV mount failures that showed `Mount failed with exit code 22`.
+- Keeps WebDAV credentials out of the URL passed to `mount_webdav`.
+- Keeps the existing encrypted local credential storage and password redaction behavior.
+
+## Assets
+
+- `AutoVolume-0.1.21-local.dmg`
+- `AutoVolume-0.1.21-local.zip`
+
+## Notes
+
+This build is ad-hoc signed for local testing and is not notarized with Developer ID. macOS may show privacy or security prompts on first launch.
+
+---
+
 # AutoVolume 0.1.20 Release Notes
 
 AutoVolume 0.1.20 is a local test release for the macOS menu bar utility that keeps network volumes mounted and reconnects them after temporary network failures.

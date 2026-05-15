@@ -145,7 +145,10 @@ func testMountPlanning() throws {
     let webdavRootPlan = try MountPlanner().mountPlan(for: webdavRoot, password: "secret")
     try expect(webdavRootPlan.standardInput?.contains("https://dav.example.com/base") == true, "WebDAV / should mount the server/base root without an extra path level")
     let quietWebDAVPlan = try MountPlanner().mountPlan(for: webdavRoot, password: "secret", suppressesUserInterface: true)
-    try expect(quietWebDAVPlan == CommandPlan(executable: "/sbin/mount_webdav", arguments: ["-S", "-s", "https://mei:secret@dav.example.com/base", "/Volumes/RootDAV"]), "Quiet WebDAV mount plan mismatch")
+    try expect(quietWebDAVPlan.executable == "/usr/bin/osascript", "WebDAV quiet mount should use AppleScript because mount_webdav rejects userinfo URLs")
+    try expect(quietWebDAVPlan.standardInput?.contains("https://dav.example.com/base") == true, "WebDAV quiet mount script missing URL")
+    try expect(quietWebDAVPlan.standardInput?.contains("mei") == true, "WebDAV quiet mount script missing username")
+    try expect(quietWebDAVPlan.standardInput?.contains("secret") == true, "WebDAV quiet mount script missing password")
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")

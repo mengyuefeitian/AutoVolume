@@ -64,10 +64,7 @@ public struct MountPlanner {
                 arguments: ["-o", "nopassprompt,soft", try smbFileSystemURL(config: config, password: password), effectiveMountPoint(for: config)]
             )
         case .webdav:
-            return CommandPlan(
-                executable: "/sbin/mount_webdav",
-                arguments: ["-S", "-s", try webDAVURLString(config: config, includeUser: true, password: password), config.mountPoint]
-            )
+            return try appleScriptMountPlan(url: webDAVURLString(config: config, includeUser: false), username: config.username, password: password)
         case .afp:
             return CommandPlan(
                 executable: "/sbin/mount_afp",
