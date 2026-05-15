@@ -1,3 +1,24 @@
+# AutoVolume 0.1.23 Release Notes
+
+AutoVolume 0.1.23 sanitizes public documentation and tests so repository and release assets do not contain local test server details.
+
+## Fixes
+
+- Replaces local test server examples with generic documentation examples.
+- Removes a historical redaction-test password fixture from tracked source.
+- Keeps the 0.1.22 duplicate Finder window fix.
+
+## Assets
+
+- `AutoVolume-0.1.23-local.dmg`
+- `AutoVolume-0.1.23-local.zip`
+
+## Notes
+
+This build is ad-hoc signed for local testing and is not notarized with Developer ID. macOS may show privacy or security prompts on first launch.
+
+---
+
 # AutoVolume 0.1.22 Release Notes
 
 AutoVolume 0.1.22 fixes duplicate Finder windows after a successful mount.

@@ -93,10 +93,10 @@ func testEncryptedFileCredentialStore() throws {
 }
 
 func testCommandResultRedactsPasswords() throws {
-    let message = "mount_smbfs: mount error: //admin:ZN245107zn@192.168.10.1/%E5%B7%A5%E5%85%B7: No such file or directory"
-    let redacted = CommandResult.redacted(message, secrets: ["ZN245107zn"])
-    try expect(!redacted.contains("ZN245107zn"), "Command output should redact raw password")
-    try expect(redacted.contains("//admin:<redacted>@192.168.10.1"), "Command output should preserve useful host context")
+    let message = "mount_smbfs: mount error: //user:super-secret@example.test/share: No such file or directory"
+    let redacted = CommandResult.redacted(message, secrets: ["super-secret"])
+    try expect(!redacted.contains("super-secret"), "Command output should redact raw password")
+    try expect(redacted.contains("//user:<redacted>@example.test"), "Command output should preserve useful host context")
 }
 
 func testSMBDialectPreferences() throws {
@@ -178,9 +178,9 @@ func testMountExposureCreatesSubdirectoryLink() throws {
         id: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
         name: "Tools",
         protocolType: .smb,
-        server: "192.168.10.1",
-        remotePath: "sda1/工具",
-        username: "admin",
+        server: "nas.example.test",
+        remotePath: "share/tools",
+        username: "user",
         mountPoint: directory.appendingPathComponent("Tools").path,
         checkIntervalSeconds: 60,
         isEnabled: true
@@ -255,11 +255,11 @@ func testAgentEngineDecisions() throws {
 
 func testSystemMountTableMatchesServerMounts() throws {
     let output = """
-    //admin@192.168.10.1/sda1 on /Volumes/sda1 (smbfs, nodev, nosuid, mounted by xiaoan)
+    //user@nas.example.test/share on /Volumes/share (smbfs, nodev, nosuid, mounted by user)
     https://mei@example.com/dav/files on /Volumes/DAV (webdav, nodev, nosuid, mounted by xiaoan)
     """
-    let smb = VolumeConfig(name: "Router", protocolType: .smb, server: "192.168.10.1", remotePath: "", username: "admin", mountPoint: "/Users/xiaoan/Volumes/", checkIntervalSeconds: 240, isEnabled: true)
-    let smbShare = VolumeConfig(name: "RouterShare", protocolType: .smb, server: "smb://192.168.10.1", remotePath: "sda1", username: "admin", mountPoint: "/Users/xiaoan/Volumes/", checkIntervalSeconds: 240, isEnabled: true)
+    let smb = VolumeConfig(name: "Router", protocolType: .smb, server: "nas.example.test", remotePath: "", username: "user", mountPoint: "/Users/example/Volumes/", checkIntervalSeconds: 240, isEnabled: true)
+    let smbShare = VolumeConfig(name: "RouterShare", protocolType: .smb, server: "smb://nas.example.test", remotePath: "share", username: "user", mountPoint: "/Users/example/Volumes/", checkIntervalSeconds: 240, isEnabled: true)
     let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "https://example.com", remotePath: "dav/files", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 240, isEnabled: true)
     let table = SystemMountTable(mountOutput: output)
 

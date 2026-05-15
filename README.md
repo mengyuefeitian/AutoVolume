@@ -10,7 +10,7 @@ AutoVolume 是一款轻量级 macOS 菜单栏工具，用于自动检查并恢�
 - 支持为每个网络卷配置服务器地址、远程路径、账号、密码、挂载点和检查间隔。
 - SMB 支持 SMB2 到 SMB3 自动协商，不启用 SMB1。
 - SMB 支持 SMB3 Multichannel 和异步目录读取相关配置。
-- 支持挂载服务器内部目录，例如 `smb://192.168.10.1/sda1/工具`。
+- 支持挂载服务器内部目录，例如 `smb://nas.local/share/tools`。
 - 网络中断后自动检测服务器恢复，并重新挂载。
 - 挂载成功后打开 Finder 到目标目录。
 - 列表展示挂载状态、失败状态和本地告警，不使用系统弹窗打断工作。
@@ -37,10 +37,10 @@ AutoVolume 是一款轻量级 macOS 菜单栏工具，用于自动检查并恢�
 
 ### SMB
 
-- Server: `192.168.10.1`
-- Remote Path: `sda1/工具`
+- Server: `nas.local`
+- Remote Path: `share/tools`
 - Mount Point: `/Users/you/Volumes/Tools`
-- Username: `admin`
+- Username: `your-user`
 
 AutoVolume 会挂载 SMB share，并让 Finder 直接打开配置的子目录。
 
