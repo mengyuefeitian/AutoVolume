@@ -1,3 +1,29 @@
+# AutoVolume 0.1.24 Release Notes
+
+AutoVolume 0.1.24 fixes WebDAV Finder reveal behavior and adds a temporary unmount action in the volume list.
+
+## Fixes
+
+- Prevents WebDAV mounts from opening a second Finder window after macOS already reveals the mounted WebDAV location.
+- Keeps SMB and other quiet mounts opening Finder after a successful mount.
+- Uses the actual backing mount point when unmounting nested SMB paths.
+
+## Improvements
+
+- Adds an Unmount button to each configured volume row for temporary manual disconnects.
+- Keeps automatic reconnect behavior active for enabled records after a manual unmount.
+
+## Assets
+
+- `AutoVolume-0.1.24-local.dmg`
+- `AutoVolume-0.1.24-local.zip`
+
+## Notes
+
+This build is ad-hoc signed for local testing and is not notarized with Developer ID. macOS may show privacy or security prompts on first launch.
+
+---
+
 # AutoVolume 0.1.23 Release Notes
 
 AutoVolume 0.1.23 sanitizes public documentation and tests so repository and release assets do not contain local test server details.

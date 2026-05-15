@@ -49,7 +49,7 @@ func runOnce() {
                 }
             } else {
                 status = try engine.check(config)
-                if !wasMounted, status == .mounted {
+                if !wasMounted, status == .mounted, mountPlanner.shouldOpenFinderAfterMount(for: config) {
                     openMountedVolume(config)
                 }
             }
@@ -80,6 +80,7 @@ func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
 }
 
 func openMountedVolume(_ config: VolumeConfig) {
+    guard mountPlanner.shouldOpenFinderAfterMount(for: config) else { return }
     let browsePath = mountPlanner.browsePath(for: config)
     Thread.sleep(forTimeInterval: 0.6)
     let script = """

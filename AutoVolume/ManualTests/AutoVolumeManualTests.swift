@@ -149,11 +149,15 @@ func testMountPlanning() throws {
     try expect(quietWebDAVPlan.standardInput?.contains("https://dav.example.com/base") == true, "WebDAV quiet mount script missing URL")
     try expect(quietWebDAVPlan.standardInput?.contains("mei") == true, "WebDAV quiet mount script missing username")
     try expect(quietWebDAVPlan.standardInput?.contains("secret") == true, "WebDAV quiet mount script missing password")
+    try expect(!MountPlanner().shouldOpenFinderAfterMount(for: webdavRoot), "WebDAV AppleScript mount already opens Finder and should not trigger a second Finder window")
+    try expect(MountPlanner().shouldOpenFinderAfterMount(for: smb), "Quiet SMB mount should still reveal the mounted folder")
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
     let forceUnmountPlan = MountPlanner().forceUnmountPlan(mountPoint: "/Volumes/Team")
     try expect(forceUnmountPlan == CommandPlan(executable: "/sbin/umount", arguments: ["-f", "/Volumes/Team"]), "Force unmount plan mismatch")
+    try expect(MountPlanner().unmountTarget(for: smbNested) == MountPlanner().effectiveMountPoint(for: smbNested), "Nested SMB unmount should target the backing mount point")
+    try expect(MountPlanner().unmountTarget(for: webdavRoot) == webdavRoot.mountPoint, "WebDAV unmount should target the visible mount point")
 }
 
 func testConnectivityPlanning() throws {

@@ -56,6 +56,14 @@ public struct MountPlanner {
         exposedPathTarget(for: config) ?? config.mountPoint
     }
 
+    public func shouldOpenFinderAfterMount(for config: VolumeConfig) -> Bool {
+        config.protocolType != .webdav
+    }
+
+    public func unmountTarget(for config: VolumeConfig) -> String {
+        effectiveMountPoint(for: config)
+    }
+
     private func quietMountPlan(for config: VolumeConfig, password: String?) throws -> CommandPlan {
         switch config.protocolType {
         case .smb:

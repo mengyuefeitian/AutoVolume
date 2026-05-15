@@ -81,6 +81,21 @@ struct ContentView: View {
                         .help(viewModel.strings.mount)
                         .disabled(workingVolumeIDs.contains(volume.id))
                         Button {
+                            Task {
+                                await unmount(volume)
+                            }
+                        } label: {
+                            if workingVolumeIDs.contains(volume.id) {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "externaldrive.badge.xmark")
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .help(viewModel.strings.unmount)
+                        .disabled(workingVolumeIDs.contains(volume.id))
+                        Button {
                             viewModel.beginEditing(volume)
                             openWindow(id: "volume-editor")
                             bringEditorForward()
@@ -174,6 +189,20 @@ struct ContentView: View {
         message = viewModel.strings.mounting
         do {
             message = try await viewModel.mountAsync(volume)
+        } catch {
+            message = error.localizedDescription
+            viewModel.refreshAlerts()
+        }
+        workingVolumeIDs.remove(volume.id)
+    }
+
+    @MainActor
+    private func unmount(_ volume: VolumeConfig) async {
+        workingVolumeIDs.insert(volume.id)
+        message = viewModel.strings.unmounting
+        do {
+            try await viewModel.unmountAsync(volume)
+            message = viewModel.strings.unmountSucceeded
         } catch {
             message = error.localizedDescription
             viewModel.refreshAlerts()

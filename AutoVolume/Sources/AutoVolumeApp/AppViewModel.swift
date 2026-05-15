@@ -53,6 +53,8 @@ struct AppStrings {
     let working: String
     let testing: String
     let mounting: String
+    let unmounting: String
+    let unmountSucceeded: String
     let alerts: String
     let clearAlerts: String
     let noAlerts: String
@@ -97,6 +99,8 @@ struct AppStrings {
                 working: "Working...",
                 testing: "Testing...",
                 mounting: "Mounting...",
+                unmounting: "Unmounting...",
+                unmountSucceeded: "Unmounted.",
                 alerts: "Alerts",
                 clearAlerts: "Clear",
                 noAlerts: "No alerts"
@@ -139,6 +143,8 @@ struct AppStrings {
                 working: "处理中...",
                 testing: "测试中...",
                 mounting: "挂载中...",
+                unmounting: "卸载中...",
+                unmountSucceeded: "已卸载。",
                 alerts: "告警",
                 clearAlerts: "清空",
                 noAlerts: "暂无告警"
@@ -302,9 +308,11 @@ public final class AppViewModel {
             try smbPreferencesWriter.apply(options: config.smbOptions)
         }
         try runMountCommand(for: config, password: storedPassword)
-        let openResult = try openMountedVolume(config)
-        if openResult.exitCode != 0 {
-            return "\(strings.mountSucceeded) Finder open failed: \(commandFailureMessage(openResult, action: "Finder"))"
+        if mountPlanner.shouldOpenFinderAfterMount(for: config) {
+            let openResult = try openMountedVolume(config)
+            if openResult.exitCode != 0 {
+                return "\(strings.mountSucceeded) Finder open failed: \(commandFailureMessage(openResult, action: "Finder"))"
+            }
         }
         return strings.mountSucceeded
     }
@@ -320,10 +328,23 @@ public final class AppViewModel {
     }
 
     public func unmount(_ config: VolumeConfig) throws {
-        let result = try commandRunner.run(mountPlanner.unmountPlan(mountPoint: config.mountPoint))
+        let mountPoint = mountPlanner.unmountTarget(for: config)
+        let result = try commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         guard result.exitCode == 0 else {
-            throw AppViewModelError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+            let forceResult = try commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+            if forceResult.exitCode != 0 {
+                throw AppViewModelError.commandFailed(commandFailureMessage(forceResult, action: "Unmount"))
+            }
+            refreshVolumeStatuses()
+            return
         }
+        refreshVolumeStatuses()
+    }
+
+    public func unmountAsync(_ config: VolumeConfig) async throws {
+        try await Task.detached {
+            try self.unmount(config)
+        }.value
     }
 
     private func persist() throws {
