@@ -31,6 +31,9 @@ public struct MountPlanner {
     }
 
     public func effectiveMountPoint(for config: VolumeConfig) -> String {
+        guard config.protocolType == .smb else {
+            return config.mountPoint
+        }
         guard let smbPath = smbRemotePath(config.remotePath), !smbPath.subpath.isEmpty else {
             return config.mountPoint
         }
@@ -56,12 +59,56 @@ public struct MountPlanner {
         exposedPathTarget(for: config) ?? config.mountPoint
     }
 
-    public func shouldOpenFinderAfterMount(for config: VolumeConfig) -> Bool {
-        config.protocolType != .webdav
+    public func shouldOpenFinderAfterMount(for _: VolumeConfig) -> Bool {
+        true
     }
 
     public func unmountTarget(for config: VolumeConfig) -> String {
-        effectiveMountPoint(for: config)
+        unmountTarget(for: config, mountTable: SystemMountTable())
+    }
+
+    public func unmountTarget(for config: VolumeConfig, mountTable: SystemMountTable) -> String {
+        switch config.protocolType {
+        case .webdav, .afp, .nfs:
+            return mountTable.mountPoint(for: config) ?? effectiveMountPoint(for: config)
+        case .smb:
+            return effectiveMountPoint(for: config)
+        }
+    }
+
+    public func resolvedBrowsePath(for config: VolumeConfig, mountTable: SystemMountTable = SystemMountTable()) -> String {
+        switch config.protocolType {
+        case .webdav, .afp, .nfs:
+            return mountTable.mountPoint(for: config) ?? browsePath(for: config)
+        case .smb:
+            return browsePath(for: config)
+        }
+    }
+
+    public func finderCleanupPaths(for config: VolumeConfig, resolvedBrowsePath: String) -> [String] {
+        var paths: [String] = []
+        for path in [config.mountPoint, effectiveMountPoint(for: config), browsePath(for: config), resolvedBrowsePath] {
+            guard !path.isEmpty, !paths.contains(path) else { continue }
+            paths.append(path)
+        }
+        return paths
+    }
+
+    public func finderRevealPlan(for config: VolumeConfig, resolvedBrowsePath: String) -> CommandPlan {
+        CommandPlan(executable: "/usr/bin/open", arguments: [resolvedBrowsePath])
+    }
+
+    public func remoteURLString(for config: VolumeConfig, includeUser: Bool = false, password: String? = nil) throws -> String {
+        switch config.protocolType {
+        case .smb:
+            return try urlString(scheme: "smb", config: config, includeUser: includeUser, password: password)
+        case .webdav:
+            return try webDAVURLString(config: config, includeUser: includeUser, password: password)
+        case .afp:
+            return try urlString(scheme: "afp", config: config, includeUser: includeUser, password: password)
+        case .nfs:
+            return "nfs://\(hostOnly(config.server))\(nfsRemotePath(config.remotePath))"
+        }
     }
 
     private func quietMountPlan(for config: VolumeConfig, password: String?) throws -> CommandPlan {

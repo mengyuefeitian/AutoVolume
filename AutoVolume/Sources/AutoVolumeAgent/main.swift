@@ -1,6 +1,9 @@
 import Foundation
+import Darwin
 import AutoVolumeShared
 
+let sessionFilePath = parsedSessionFilePath(arguments: CommandLine.arguments)
+let launchAgentLabel = "com.autovolume.agent"
 let store = JSONConfigStore()
 let credentialStore = EncryptedFileCredentialStore()
 let commandRunner = ProcessCommandRunner()
@@ -18,6 +21,11 @@ let alertStore = AlertStore()
 var networkFailedVolumeIDs = Set<UUID>()
 
 func runOnce() {
+    guard appSessionIsActive() else {
+        cleanupOrphanedLaunchAgent()
+        exit(0)
+    }
+
     let configs: [VolumeConfig]
     do {
         configs = try store.load()
@@ -33,10 +41,11 @@ func runOnce() {
         }
 
         do {
-            guard try serverIsReachable(config) else {
+            let connectivity = try serverReachability(config)
+            guard connectivity.isReachable else {
                 networkFailedVolumeIDs.insert(config.id)
                 scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, retryInterval: 60, now: now))
-                try? alertStore.record(volumeID: config.id, volumeName: config.name, message: "Server is not reachable. AutoVolume will retry after the network returns.", date: now)
+                try? alertStore.record(volumeID: config.id, volumeName: config.name, message: connectivity.message ?? "Server is not reachable. AutoVolume will retry after the network returns.", date: now)
                 continue
             }
 
@@ -72,25 +81,39 @@ func runOnce() {
     }
 }
 
-func serverIsReachable(_ config: VolumeConfig) throws -> Bool {
+func serverReachability(_ config: VolumeConfig) throws -> ConnectivityCheckResult {
     let password = config.protocolType == .webdav ? try credentialStore.password(for: config.id) : nil
     let plan = try connectivityTester.testPlan(for: config, password: password)
     let result = try commandRunner.run(plan).redacting(secrets: [password])
-    return result.exitCode == 0
+    return connectivityTester.checkResult(for: config, result: result)
 }
 
 func openMountedVolume(_ config: VolumeConfig) {
     guard mountPlanner.shouldOpenFinderAfterMount(for: config) else { return }
-    let browsePath = mountPlanner.browsePath(for: config)
+    let browsePath = mountPlanner.resolvedBrowsePath(for: config)
     Thread.sleep(forTimeInterval: 0.6)
+    cleanupFinderWindows(config, resolvedBrowsePath: browsePath)
+    let plan = mountPlanner.finderRevealPlan(for: config, resolvedBrowsePath: browsePath)
+    _ = try? commandRunner.run(plan)
+}
+
+func cleanupFinderWindows(_ config: VolumeConfig, resolvedBrowsePath: String) {
+    let paths = mountPlanner.finderCleanupPaths(for: config, resolvedBrowsePath: resolvedBrowsePath)
+    guard !paths.isEmpty else { return }
     let script = """
     tell application "Finder"
-        activate
-        make new Finder window to (POSIX file "\(appleScriptEscaped(browsePath))" as alias)
+        repeat with windowPath in {\(paths.map { "\"\(appleScriptEscaped($0))\"" }.joined(separator: ", "))}
+            repeat with finderWindow in windows
+                try
+                    if POSIX path of (target of finderWindow as alias) is (windowPath as text) then
+                        close finderWindow
+                    end if
+                end try
+            end repeat
+        end repeat
     end tell
     """
-    let plan = CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script)
-    _ = try? commandRunner.run(plan)
+    _ = try? commandRunner.run(CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script))
 }
 
 func appleScriptEscaped(_ value: String) -> String {
@@ -140,10 +163,42 @@ func isNetworkFailure(_ message: String) -> Bool {
     ].contains { normalized.contains($0) }
 }
 
-let timer = Timer(timeInterval: 15, repeats: true) { _ in
+func parsedSessionFilePath(arguments: [String]) -> String? {
+    guard let index = arguments.firstIndex(of: "--session-file"),
+          arguments.indices.contains(index + 1) else {
+        return nil
+    }
+    return arguments[index + 1]
+}
+
+func appSessionIsActive() -> Bool {
+    guard let sessionFilePath else { return true }
+    guard let rawPID = try? String(contentsOfFile: sessionFilePath, encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+        let pid = Int32(rawPID) else {
+        return false
+    }
+    return kill(pid, 0) == 0 || errno == EPERM
+}
+
+func cleanupOrphanedLaunchAgent() {
+    if let sessionFilePath {
+        try? FileManager.default.removeItem(atPath: sessionFilePath)
+    }
+    if let launchAgentsDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.appendingPathComponent("LaunchAgents", isDirectory: true) {
+        try? FileManager.default.removeItem(at: launchAgentsDirectory.appendingPathComponent("\(launchAgentLabel).plist"))
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    process.arguments = ["bootout", "gui/\(getuid())/\(launchAgentLabel)"]
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+    try? process.run()
+}
+
+let timer = Timer(timeInterval: 60, repeats: true) { _ in
     runOnce()
 }
 
 RunLoop.main.add(timer, forMode: .default)
-runOnce()
 RunLoop.main.run()

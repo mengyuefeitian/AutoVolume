@@ -15,6 +15,8 @@
       --cyan: #16a3c7;
       --panel: rgba(255, 255, 255, 0.74);
       --bg: #eef7ff;
+      --good: #20c46b;
+      --warn: #f59e0b;
     }
 
     * { box-sizing: border-box; }
@@ -28,6 +30,7 @@
         radial-gradient(circle at 78% 6%, rgba(40, 111, 230, 0.14), transparent 24rem),
         linear-gradient(180deg, #f7fbff 0%, var(--bg) 46%, #ffffff 100%);
       line-height: 1.5;
+      overflow-x: hidden;
     }
 
     .wrap {
@@ -36,10 +39,10 @@
     }
 
     header {
-      min-height: 92vh;
+      min-height: 88vh;
       display: grid;
       align-items: center;
-      padding: 48px 0;
+      padding: 86px 0 48px;
     }
 
     nav {
@@ -85,7 +88,13 @@
       grid-template-columns: 1.05fr 0.95fr;
       gap: 54px;
       align-items: center;
-      padding-top: 42px;
+    }
+
+    .hero > *,
+    .grid > *,
+    .steps > *,
+    .split > * {
+      min-width: 0;
     }
 
     .eyebrow {
@@ -99,6 +108,8 @@
       font-size: clamp(46px, 8vw, 86px);
       line-height: 0.95;
       letter-spacing: 0;
+      max-width: 100%;
+      overflow-wrap: break-word;
     }
 
     .lead {
@@ -106,6 +117,27 @@
       color: var(--muted);
       font-size: 20px;
       max-width: 650px;
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.68);
+      color: #38516f;
+      font-size: 14px;
+      font-weight: 680;
+      white-space: nowrap;
     }
 
     .actions {
@@ -165,23 +197,32 @@
 
     .volume {
       display: grid;
-      grid-template-columns: 20px 1fr auto;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
       gap: 14px;
       align-items: center;
       padding: 18px 0;
       border-bottom: 1px solid var(--line);
     }
 
+    .volume div:nth-child(2) {
+      min-width: 0;
+    }
+
     .dot {
       width: 12px;
       height: 12px;
       border-radius: 50%;
-      background: #20c46b;
+      background: var(--good);
       box-shadow: 0 0 0 6px rgba(32, 196, 107, 0.12);
     }
 
     .volume strong { display: block; }
-    .volume span { color: var(--muted); font-size: 14px; }
+    .volume span {
+      color: var(--muted);
+      display: block;
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
 
     .pill {
       color: #185a34;
@@ -191,6 +232,26 @@
       padding: 6px 10px;
       font-size: 13px;
       font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .mini-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .mini-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--ink);
+      font-weight: 800;
     }
 
     section {
@@ -233,6 +294,7 @@
     .card p {
       margin: 0;
       color: var(--muted);
+      overflow-wrap: anywhere;
     }
 
     .steps {
@@ -246,6 +308,7 @@
       padding: 22px;
       border-left: 3px solid var(--blue);
       background: rgba(255,255,255,0.66);
+      overflow-wrap: anywhere;
     }
 
     .step::before {
@@ -257,6 +320,42 @@
       margin-bottom: 10px;
     }
 
+    .split {
+      display: grid;
+      grid-template-columns: 0.92fr 1.08fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .note {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .note p {
+      color: var(--muted);
+      margin: 0 0 14px;
+      overflow-wrap: anywhere;
+    }
+
+    .list {
+      display: grid;
+      gap: 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .list li {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.7);
+      overflow-wrap: anywhere;
+    }
+
     footer {
       padding: 38px 0 56px;
       color: var(--muted);
@@ -264,10 +363,135 @@
     }
 
     @media (max-width: 820px) {
-      nav { position: static; transform: none; margin-top: 16px; }
-      header { padding-top: 0; }
-      .hero, .grid, .steps { grid-template-columns: 1fr; }
-      .device { order: -1; }
+      .wrap {
+        width: min(342px, calc(100vw - 32px));
+        max-width: 640px;
+      }
+
+      nav {
+        position: sticky;
+        top: 10px;
+        width: min(366px, calc(100vw - 24px));
+        max-width: 640px;
+        transform: none;
+        left: auto;
+        margin: 10px auto 0;
+        border-radius: 16px;
+        gap: 12px;
+        padding: 10px 12px;
+      }
+
+      .brand {
+        min-width: 0;
+        gap: 8px;
+      }
+
+      .brand img {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+      }
+
+      .brand span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      nav a {
+        font-size: 13px;
+        flex: 0 0 auto;
+      }
+
+      header {
+        min-height: auto;
+        padding: 34px 0 34px;
+      }
+
+      .hero, .grid, .steps, .split {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        gap: 28px;
+      }
+
+      h1 {
+        font-size: clamp(36px, 10vw, 42px);
+        line-height: 1;
+      }
+
+      h2 {
+        font-size: clamp(28px, 10vw, 38px);
+      }
+
+      .lead {
+        font-size: 17px;
+        margin-top: 18px;
+        overflow-wrap: anywhere;
+      }
+
+      .badges {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .badge {
+        justify-content: center;
+        min-width: 0;
+        white-space: normal;
+        text-align: center;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        margin-top: 24px;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .device {
+        order: -1;
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
+        border-radius: 22px;
+        padding: 18px;
+        box-shadow: 0 18px 46px rgba(43, 86, 132, 0.14);
+      }
+
+      .statusbar {
+        padding-bottom: 14px;
+      }
+
+      .volume {
+        grid-template-columns: 16px minmax(0, 1fr);
+        gap: 10px;
+      }
+
+      .pill {
+        grid-column: 2;
+        justify-self: start;
+      }
+
+      section {
+        padding: 46px 0;
+      }
+
+      .card, .step, .note, .list li {
+        padding: 18px;
+      }
+
+      .card {
+        min-height: auto;
+      }
+
+      footer {
+        padding: 28px 0 40px;
+      }
     }
   </style>
 </head>
@@ -286,6 +510,12 @@
         <p class="eyebrow">Minimal macOS network volume utility</p>
         <h1>AutoVolume 智卷</h1>
         <p class="lead">自动检查 SMB、WebDAV、AFP、NFS 网络卷挂载状态。网络恢复后自动重连，并把 Finder 带回你真正想进入的目录。</p>
+        <div class="badges" aria-label="核心能力">
+          <span class="badge">SMB2-SMB3</span>
+          <span class="badge">HTTPS WebDAV</span>
+          <span class="badge">自动重连</span>
+          <span class="badge">本地加密</span>
+        </div>
         <div class="actions">
           <a class="button primary" href="#download">下载 DMG</a>
           <a class="button secondary" href="#features">了解功能</a>
@@ -311,6 +541,11 @@
           <div><strong>NFS Media</strong><span>NFS · nas.local/exports/media</span></div>
           <div class="pill">Ready</div>
         </div>
+        <div class="mini-actions" aria-label="Mount and unmount controls">
+          <div class="mini-button">✓</div>
+          <div class="mini-button">⏏</div>
+          <div class="mini-button">✎</div>
+        </div>
       </div>
     </div>
   </header>
@@ -323,11 +558,25 @@
         <div class="grid">
           <article class="card"><h3>多协议支持</h3><p>支持 SMB、WebDAV、AFP、NFS，可为每个卷独立配置服务器、路径、账号和挂载点。</p></article>
           <article class="card"><h3>断网恢复</h3><p>网络恢复后自动重新连接，处理占用的旧挂载点，减少 Finder 中假在线的问题。</p></article>
-          <article class="card"><h3>目录直达</h3><p>支持挂载服务器内部目录，例如 SMB 的 share/folder，并打开 Finder 到目标目录。</p></article>
+          <article class="card"><h3>目录直达</h3><p>支持挂载服务器内部目录，例如 SMB 的 share/folder；WebDAV 会解析真实挂载点，只打开最终目标窗口。</p></article>
           <article class="card"><h3>本地加密</h3><p>密码保存在本地加密文件中，不依赖钥匙串，错误输出会自动脱敏。</p></article>
           <article class="card"><h3>SMB2-SMB3</h3><p>默认支持 SMB2 到 SMB3 自动协商，不启用 SMB1，并可配置 SMB3 Multichannel。</p></article>
-          <article class="card"><h3>安静告警</h3><p>失败信息放在 App 内，不使用系统弹窗打断工作流。</p></article>
+          <article class="card"><h3>手动控制</h3><p>列表内支持挂载、卸载、编辑和移除。手动卸载只是临时操作，启用状态下仍会按检查间隔保活。</p></article>
         </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <h2>适合长期挂载 NAS 和私有云</h2>
+          <p class="section-lead">AutoVolume 更像一个安静的菜单栏守护工具，不抢屏幕、不频繁弹系统窗口，只在需要时把网络卷恢复到可用状态。</p>
+        </div>
+        <ul class="list">
+          <li><strong>WebDAV 体验优化</strong><br>兼容 HTTPS WebDAV，挂载后会清理重复 Finder 窗口，并进入系统真实挂载目录。</li>
+          <li><strong>网络恢复后重连</strong><br>网络短暂中断时按 1 分钟节奏检测恢复；其他错误按配置的检查间隔处理。</li>
+          <li><strong>减少钥匙串打扰</strong><br>凭据使用本地加密文件保存，避免 macOS 钥匙串反复请求授权。</li>
+        </ul>
       </div>
     </section>
 
@@ -346,9 +595,9 @@
     <section id="download">
       <div class="wrap">
         <h2>下载</h2>
-        <p class="section-lead">公开发布后，请在 GitHub Releases 中下载最新版 DMG。当前本地测试版本为 0.1.20。</p>
+        <p class="section-lead">最新正式版本为 0.1.37。请在 GitHub Releases 下载 DMG，并拖入 Applications 安装。</p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/mengyuefeitian/AutoVolume/releases">前往 GitHub Releases</a>
+          <a class="button primary" href="https://github.com/mengyuefeitian/AutoVolume/releases/tag/v0.1.37">下载 0.1.37</a>
           <a class="button secondary" href="#features">查看功能</a>
         </div>
       </div>

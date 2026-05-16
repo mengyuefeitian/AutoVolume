@@ -16,6 +16,8 @@ enum LaunchAgentInstaller {
 
         do {
             try fileManager.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "\(getpid())\n".write(to: sessionURL, atomically: true, encoding: .utf8)
             let plistURL = launchAgentsDirectory.appendingPathComponent("\(label).plist")
             try plist(agentPath: agentURL.path).write(to: plistURL, atomically: true, encoding: .utf8)
             restartAgent(plistURL: plistURL)
@@ -30,7 +32,12 @@ enum LaunchAgentInstaller {
             return
         }
         let plistURL = launchAgentsDirectory.appendingPathComponent("\(label).plist")
+        try? FileManager.default.removeItem(at: sessionURL)
+        _ = runLaunchctl(arguments: ["bootout", "\(domain)/\(label)"])
         _ = runLaunchctl(arguments: ["bootout", domain, plistURL.path])
+        _ = runLaunchctl(arguments: ["kill", "TERM", "\(domain)/\(label)"])
+        terminateResidualAgents()
+        try? FileManager.default.removeItem(at: plistURL)
     }
 
     private static func plist(agentPath: String) -> String {
@@ -44,6 +51,8 @@ enum LaunchAgentInstaller {
             <key>ProgramArguments</key>
             <array>
                 <string>\(xmlEscaped(agentPath))</string>
+                <string>--session-file</string>
+                <string>\(xmlEscaped(sessionURL.path))</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
@@ -58,9 +67,18 @@ enum LaunchAgentInstaller {
 
     private static func restartAgent(plistURL: URL) {
         let domain = "gui/\(getuid())"
+        _ = runLaunchctl(arguments: ["bootout", "\(domain)/\(label)"])
         _ = runLaunchctl(arguments: ["bootout", domain, plistURL.path])
         _ = runLaunchctl(arguments: ["bootstrap", domain, plistURL.path])
         _ = runLaunchctl(arguments: ["enable", "\(domain)/\(label)"])
+    }
+
+    private static var sessionURL: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("AutoVolume", isDirectory: true)
+            .appendingPathComponent("agent.session")
     }
 
     private static func runLaunchctl(arguments: [String]) -> Bool {
@@ -75,6 +93,20 @@ enum LaunchAgentInstaller {
             return process.terminationStatus == 0
         } catch {
             return false
+        }
+    }
+
+    private static func terminateResidualAgents() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        process.arguments = ["-f", "/AutoVolume.app/Contents/Resources/AutoVolumeAgent"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return
         }
     }
 

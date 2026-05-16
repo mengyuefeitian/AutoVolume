@@ -138,18 +138,22 @@ func testMountPlanning() throws {
 
     let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "dav.example.com", remotePath: "remote.php/dav/files/mei", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 60, isEnabled: true)
     let webdavPlan = try MountPlanner().mountPlan(for: webdav, password: "secret")
-    try expect(webdavPlan.executable == "/usr/bin/osascript", "WebDAV mount should use AppleScript")
+    try expect(webdavPlan.executable == "/usr/bin/osascript", "WebDAV mount should use the Finder-compatible AppleScript path")
     try expect(webdavPlan.standardInput?.contains("https://dav.example.com/remote.php/dav/files/mei") == true, "WebDAV mount script missing URL")
 
     let webdavRoot = VolumeConfig(name: "RootDAV", protocolType: .webdav, server: "https://dav.example.com/base", remotePath: "/", username: "mei", mountPoint: "/Volumes/RootDAV", checkIntervalSeconds: 60, isEnabled: true)
     let webdavRootPlan = try MountPlanner().mountPlan(for: webdavRoot, password: "secret")
     try expect(webdavRootPlan.standardInput?.contains("https://dav.example.com/base") == true, "WebDAV / should mount the server/base root without an extra path level")
     let quietWebDAVPlan = try MountPlanner().mountPlan(for: webdavRoot, password: "secret", suppressesUserInterface: true)
-    try expect(quietWebDAVPlan.executable == "/usr/bin/osascript", "WebDAV quiet mount should use AppleScript because mount_webdav rejects userinfo URLs")
-    try expect(quietWebDAVPlan.standardInput?.contains("https://dav.example.com/base") == true, "WebDAV quiet mount script missing URL")
-    try expect(quietWebDAVPlan.standardInput?.contains("mei") == true, "WebDAV quiet mount script missing username")
-    try expect(quietWebDAVPlan.standardInput?.contains("secret") == true, "WebDAV quiet mount script missing password")
-    try expect(!MountPlanner().shouldOpenFinderAfterMount(for: webdavRoot), "WebDAV AppleScript mount already opens Finder and should not trigger a second Finder window")
+    try expect(quietWebDAVPlan.executable == "/usr/bin/osascript", "WebDAV quiet mount should use Finder-compatible AppleScript")
+    try expect(quietWebDAVPlan.arguments == ["-"], "WebDAV AppleScript should be passed through stdin")
+    try expect(quietWebDAVPlan.standardInput?.contains("mount volume \"https://dav.example.com/base\"") == true, "WebDAV quiet mount script missing URL")
+    try expect(quietWebDAVPlan.standardInput?.contains("as user name \"mei\"") == true, "WebDAV quiet mount script missing username")
+    try expect(quietWebDAVPlan.standardInput?.contains("with password \"secret\"") == true, "WebDAV quiet mount script missing password")
+    try expect(quietWebDAVPlan.standardInput?.contains("mount_webdav") == false, "WebDAV quiet mount must not use mount_webdav/expect")
+    let webdavRootNativeURL = try MountPlanner().remoteURLString(for: webdavRoot)
+    try expect(webdavRootNativeURL == "https://dav.example.com/base", "WebDAV native mount URL should preserve the configured server root")
+    try expect(MountPlanner().shouldOpenFinderAfterMount(for: webdavRoot), "WebDAV should open Finder after cleanup so the user lands in the real mounted folder")
     try expect(MountPlanner().shouldOpenFinderAfterMount(for: smb), "Quiet SMB mount should still reveal the mounted folder")
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
@@ -157,7 +161,9 @@ func testMountPlanning() throws {
     let forceUnmountPlan = MountPlanner().forceUnmountPlan(mountPoint: "/Volumes/Team")
     try expect(forceUnmountPlan == CommandPlan(executable: "/sbin/umount", arguments: ["-f", "/Volumes/Team"]), "Force unmount plan mismatch")
     try expect(MountPlanner().unmountTarget(for: smbNested) == MountPlanner().effectiveMountPoint(for: smbNested), "Nested SMB unmount should target the backing mount point")
-    try expect(MountPlanner().unmountTarget(for: webdavRoot) == webdavRoot.mountPoint, "WebDAV unmount should target the visible mount point")
+    let webdavMountOutput = "https://mei@dav.example.com/base on /Volumes/base (webdav, nodev, nosuid, mounted by mei)"
+    try expect(MountPlanner().unmountTarget(for: webdavRoot, mountTable: SystemMountTable(mountOutput: webdavMountOutput)) == "/Volumes/base", "WebDAV unmount should target the real mounted path")
+    try expect(MountPlanner().finderCleanupPaths(for: webdavRoot, resolvedBrowsePath: "/Volumes/base") == ["/Volumes/RootDAV", "/Volumes/base"], "Finder cleanup should include visible and resolved WebDAV paths once")
 }
 
 func testConnectivityPlanning() throws {
@@ -167,11 +173,21 @@ func testConnectivityPlanning() throws {
 
     let webdav = VolumeConfig(name: "DAV", protocolType: .webdav, server: "https://dav.example.com", remotePath: "remote.php/dav/files/mei", username: "mei", mountPoint: "/Volumes/DAV", checkIntervalSeconds: 60, isEnabled: true)
     let webdavPlan = try ConnectivityTester().testPlan(for: webdav, password: "secret")
-    try expect(webdavPlan == CommandPlan(executable: "/usr/bin/curl", arguments: ["--user", "mei:secret", "--head", "--location", "--max-time", "10", "https://dav.example.com/remote.php/dav/files/mei"]), "WebDAV connectivity plan mismatch")
+    try expect(webdavPlan == CommandPlan(executable: "/usr/bin/curl", arguments: ["--user", "mei:secret", "--fail-with-body", "--silent", "--show-error", "--request", "PROPFIND", "--header", "Depth: 0", "--max-time", "10", "https://dav.example.com/remote.php/dav/files/mei"]), "WebDAV connectivity plan mismatch")
 
     let webdavBackslash = VolumeConfig(name: "DAVSlash", protocolType: .webdav, server: "https://dav.example.com/base", remotePath: "\\team\\video", username: nil, mountPoint: "/Volumes/DAVSlash", checkIntervalSeconds: 60, isEnabled: true)
     let webdavBackslashPlan = try ConnectivityTester().testPlan(for: webdavBackslash, password: nil)
     try expect(webdavBackslashPlan.arguments.last == "https://dav.example.com/base/team/video", "WebDAV connectivity should normalize backslashes")
+
+    let unauthorized = CommandResult(exitCode: 22, stdout: "<html><title>401 Unauthorized</title></html>", stderr: "curl: (22) The requested URL returned error: 401")
+    let unauthorizedCheck = ConnectivityTester().checkResult(for: webdav, result: unauthorized)
+    try expect(!unauthorizedCheck.isReachable, "WebDAV 401 should not be treated as reachable")
+    try expect(unauthorizedCheck.message?.contains("authentication failed") == true, "WebDAV 401 should produce an authentication message")
+
+    let nfs = VolumeConfig(name: "NFS", protocolType: .nfs, server: "nas.local", remotePath: "video", username: nil, mountPoint: "/Volumes/NFS", checkIntervalSeconds: 60, isEnabled: true)
+    let nfsCheck = ConnectivityTester().checkResult(for: nfs, result: CommandResult(exitCode: 1, stdout: "", stderr: ""))
+    try expect(!nfsCheck.isReachable, "NFS failed probe should not be treated as reachable")
+    try expect(nfsCheck.message?.contains("port 2049") == true, "NFS failed probe should mention port 2049")
 }
 
 func testMountExposureCreatesSubdirectoryLink() throws {
@@ -255,6 +271,7 @@ func testAgentEngineDecisions() throws {
     let reconnectStatus = try reconnectEngine.reconnect(unmounted)
     try expect(reconnectStatus == .mounted, "Reconnect should remount after a network outage")
     try expect(reconnectRunner.plans.map(\.executable) == ["/usr/sbin/diskutil", "/sbin/umount", "/sbin/mount_smbfs"], "Reconnect command order mismatch")
+
 }
 
 func testSystemMountTableMatchesServerMounts() throws {
@@ -270,6 +287,20 @@ func testSystemMountTableMatchesServerMounts() throws {
     try expect(table.contains(config: smb), "Empty SMB remote path should match an existing server mount")
     try expect(table.contains(config: smbShare), "SMB remote share should match an existing share mount")
     try expect(table.contains(config: webdav), "WebDAV path should match an existing WebDAV mount")
+    try expect(table.mountPoint(for: webdav) == "/Volumes/DAV", "WebDAV mounted path should be discoverable from the mount table")
+}
+
+func testFinderRevealPlanning() throws {
+    let output = """
+    https://mei@example.com/video/ on /Volumes/video (webdav, nodev, nosuid, mounted by xiaoan)
+    """
+    let webdav = VolumeConfig(name: "B", protocolType: .webdav, server: "https://example.com", remotePath: "video", username: "mei", mountPoint: "/Users/example/Volumes/B", checkIntervalSeconds: 60, isEnabled: true)
+    let planner = MountPlanner()
+    let resolvedPath = planner.resolvedBrowsePath(for: webdav, mountTable: SystemMountTable(mountOutput: output))
+    try expect(resolvedPath == "/Volumes/video", "WebDAV Finder reveal should use the real mounted path from the system mount table")
+
+    let revealPlan = planner.finderRevealPlan(for: webdav, resolvedBrowsePath: resolvedPath)
+    try expect(revealPlan == CommandPlan(executable: "/usr/bin/open", arguments: ["/Volumes/video"]), "Finder reveal should use open instead of fragile Finder AppleScript")
 }
 
 func testCheckScheduler() throws {
@@ -346,6 +377,7 @@ let tests: [(String, () throws -> Void)] = [
     ("PathHealthProbe", testPathHealthProbe),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
+    ("FinderRevealPlanning", testFinderRevealPlanning),
     ("CheckScheduler", testCheckScheduler),
     ("AlertStore", testAlertStore)
 ]

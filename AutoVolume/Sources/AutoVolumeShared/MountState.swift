@@ -93,20 +93,26 @@ public struct SystemMountTable {
     }
 
     public func contains(config: VolumeConfig) -> Bool {
+        mountPoint(for: config) != nil
+    }
+
+    public func mountPoint(for config: VolumeConfig) -> String? {
         let output: String
         if let mountOutput {
             output = mountOutput
         } else {
             let result = runMount()
-            guard result.exitCode == 0 else { return false }
+            guard result.exitCode == 0 else { return nil }
             output = result.stdout
         }
         return output
             .split(separator: "\n")
             .map(String.init)
-            .contains { line in
-                matches(line: line, config: config)
+            .compactMap { line -> String? in
+                guard matches(line: line, config: config) else { return nil }
+                return parsedMountPoint(from: line)
             }
+            .first
     }
 
     private func matches(line: String, config: VolumeConfig) -> Bool {
@@ -123,6 +129,15 @@ public struct SystemMountTable {
             return lowercasedLine.contains("/\(share)")
         }
         return lowercasedLine.contains("/\(remotePath)")
+    }
+
+    private func parsedMountPoint(from line: String) -> String? {
+        guard let onRange = line.range(of: " on "),
+              let optionsRange = line.range(of: " (", options: .backwards),
+              onRange.upperBound < optionsRange.lowerBound else {
+            return nil
+        }
+        return String(line[onRange.upperBound..<optionsRange.lowerBound])
     }
 
     private func fileSystemName(for protocolType: VolumeProtocol) -> String {

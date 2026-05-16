@@ -40,6 +40,7 @@ struct ContentView: View {
                 }
                 .help(viewModel.strings.alerts)
                 Button {
+                    hideListWindow()
                     viewModel.beginAddingVolume()
                     openWindow(id: "volume-editor")
                     bringEditorForward()
@@ -89,13 +90,14 @@ struct ContentView: View {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
-                                Image(systemName: "externaldrive.badge.xmark")
+                                Image(systemName: "eject.circle")
                             }
                         }
                         .buttonStyle(.borderless)
                         .help(viewModel.strings.unmount)
                         .disabled(workingVolumeIDs.contains(volume.id))
                         Button {
+                            hideListWindow()
                             viewModel.beginEditing(volume)
                             openWindow(id: "volume-editor")
                             bringEditorForward()
@@ -140,10 +142,8 @@ struct ContentView: View {
     }
 
     private func bringEditorForward() {
-        [0.05, 0.2, 0.45].forEach { delay in
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                focusEditorWindow()
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            focusEditorWindow()
         }
     }
 
@@ -151,13 +151,20 @@ struct ContentView: View {
         NSApp.activate(ignoringOtherApps: true)
         let editorWindow = NSApp.windows.first { $0.identifier?.rawValue == "volume-editor" }
         if let editorWindow {
-            editorWindow.level = .modalPanel
+            editorWindow.level = .floating
             editorWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
             editorWindow.hidesOnDeactivate = false
-            editorWindow.orderFrontRegardless()
             editorWindow.makeKeyAndOrderFront(nil)
         } else {
             NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func hideListWindow() {
+        DispatchQueue.main.async {
+            NSApp.windows
+                .filter { $0.identifier?.rawValue != "volume-editor" }
+                .forEach { $0.orderOut(nil) }
         }
     }
 
@@ -185,6 +192,7 @@ struct ContentView: View {
 
     @MainActor
     private func mount(_ volume: VolumeConfig) async {
+        hideListWindow()
         workingVolumeIDs.insert(volume.id)
         message = viewModel.strings.mounting
         do {
@@ -198,6 +206,7 @@ struct ContentView: View {
 
     @MainActor
     private func unmount(_ volume: VolumeConfig) async {
+        hideListWindow()
         workingVolumeIDs.insert(volume.id)
         message = viewModel.strings.unmounting
         do {

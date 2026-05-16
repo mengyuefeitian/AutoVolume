@@ -19,10 +19,11 @@ AutoVolume 是一款轻量级 macOS 菜单栏工具，用于自动检查并恢�
 
 ## 下载和安装
 
-当前测试包位于：
+最新正式版本为 `0.1.37`，请从 GitHub Releases 下载：
 
-- DMG: `AutoVolume/dist/AutoVolume-0.1.20-local.dmg`
-- ZIP: `AutoVolume/dist/AutoVolume-0.1.20-local.zip`
+- Releases: https://github.com/mengyuefeitian/AutoVolume/releases
+- DMG: `AutoVolume-0.1.37.dmg`
+- ZIP: `AutoVolume-0.1.37.zip`
 
 安装方式：
 
@@ -76,7 +77,7 @@ cd AutoVolume
 
 ```bash
 cd AutoVolume
-./script/package_dmg.sh 0.1.20
+./script/package_dmg.sh 0.1.37
 ```
 
 ## 项目结构
@@ -95,13 +96,16 @@ docs/
 
 ## 发布说明
 
-### 0.1.20 local
+### 0.1.37
 
-- 改进 Agent 首次自动挂载后的 Finder 打开行为。
-- 改进 DMG 安装窗口布局和 Applications 图标显示。
-- 支持 SMB 子目录直接浏览。
-- 支持本地加密密码存储。
-- 支持非系统弹窗告警。
+- WebDAV 回到 Finder-compatible AppleScript 挂载路径，避免 `mount_webdav/expect` 的超时和退出码问题。
+- 挂载成功后会清理重复 Finder 窗口，并打开系统真实挂载目录。
+- 改进 WebDAV、AFP、NFS 的真实挂载点识别和卸载目标选择。
+- 网络恢复检测按 1 分钟节奏重试，非网络错误按配置检查间隔处理。
+- 增加列表内挂载、卸载、编辑、移除操作和成功/失败状态标记。
+- 密码使用本地加密文件保存，错误输出会脱敏。
+- 改进 Agent 退出清理，主 App 退出时不再留下孤立保活进程。
+- 更新 DMG 安装窗口和 GitHub Pages 介绍页，并优化手机阅读体验。
 
 ## License
 

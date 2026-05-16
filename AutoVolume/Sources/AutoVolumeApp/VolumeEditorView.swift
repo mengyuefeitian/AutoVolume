@@ -71,6 +71,7 @@ struct VolumeEditorView: View {
                         }
                         GridRow {
                             Text(viewModel.strings.remotePath)
+                                .gridCellAnchor(.topLeading)
                             VStack(alignment: .leading, spacing: 4) {
                                 TextField(viewModel.strings.remotePath, text: $remotePath)
                                 Text(viewModel.strings.remotePathHelp)
@@ -253,13 +254,10 @@ private struct FloatingWindowAccessor: NSViewRepresentable {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
-            window.level = .modalPanel
+            window.level = .floating
             window.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
             window.hidesOnDeactivate = false
             window.isReleasedWhenClosed = false
-            NSApp.activate(ignoringOtherApps: true)
-            window.orderFrontRegardless()
-            window.makeKeyAndOrderFront(nil)
         }
         return view
     }
@@ -268,12 +266,9 @@ private struct FloatingWindowAccessor: NSViewRepresentable {
         DispatchQueue.main.async {
             guard let window = nsView.window else { return }
             window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
-            window.level = .modalPanel
+            window.level = .floating
             window.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
             window.hidesOnDeactivate = false
-            NSApp.activate(ignoringOtherApps: true)
-            window.orderFrontRegardless()
-            window.makeKeyAndOrderFront(nil)
         }
     }
 }

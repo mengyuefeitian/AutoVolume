@@ -289,6 +289,11 @@ public final class AppViewModel {
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
+        if config.protocolType == .webdav {
+            try verifyConnectivity(for: config, password: password, action: "Connection test")
+            return strings.testSucceeded
+        }
+
         let result = try runTemporaryMountTest(for: config, password: password)
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(commandFailureMessage(result, action: "Connection test"))
@@ -383,26 +388,52 @@ public final class AppViewModel {
     }
 
     private func runMountCommand(for config: VolumeConfig, password: String?) throws {
+        if config.protocolType == .webdav {
+            try verifyConnectivity(for: config, password: password, action: "Mount")
+        }
         try mountExposure.prepare(config: config, planner: mountPlanner)
         let result = try runMountWithRecovery(for: config, password: password)
         guard result.exitCode == 0 else {
-            throw AppViewModelError.commandFailed(commandFailureMessage(result, action: "Mount"))
+            throw AppViewModelError.commandFailed(mountFailureMessage(for: config, result: result))
         }
         try mountExposure.expose(config: config, planner: mountPlanner)
         try? alertStore.resolve(volumeID: config.id)
         refreshAlerts()
     }
 
+    private func verifyConnectivity(for config: VolumeConfig, password: String?, action: String) throws {
+        let plan = try connectivityTester.testPlan(for: config, password: password)
+        let result = try commandRunner.run(plan).redacting(secrets: [password])
+        let connectivity = connectivityTester.checkResult(for: config, result: result)
+        guard connectivity.isReachable else {
+            throw AppViewModelError.commandFailed(connectivity.message ?? commandFailureMessage(result, action: action))
+        }
+    }
+
     private func openMountedVolume(_ config: VolumeConfig) throws -> CommandResult {
-        let browsePath = mountPlanner.browsePath(for: config)
+        let browsePath = mountPlanner.resolvedBrowsePath(for: config)
         Thread.sleep(forTimeInterval: 0.6)
+        cleanupFinderWindows(for: config, resolvedBrowsePath: browsePath)
+        return try commandRunner.run(mountPlanner.finderRevealPlan(for: config, resolvedBrowsePath: browsePath))
+    }
+
+    private func cleanupFinderWindows(for config: VolumeConfig, resolvedBrowsePath: String) {
+        let paths = mountPlanner.finderCleanupPaths(for: config, resolvedBrowsePath: resolvedBrowsePath)
+        guard !paths.isEmpty else { return }
         let script = """
         tell application "Finder"
-            activate
-            make new Finder window to (POSIX file "\(Self.appleScriptEscaped(browsePath))" as alias)
+            repeat with windowPath in {\(paths.map { "\"\(Self.appleScriptEscaped($0))\"" }.joined(separator: ", "))}
+                repeat with finderWindow in windows
+                    try
+                        if POSIX path of (target of finderWindow as alias) is (windowPath as text) then
+                            close finderWindow
+                        end if
+                    end try
+                end repeat
+            end repeat
         end tell
         """
-        return try commandRunner.run(CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script))
+        _ = try? commandRunner.run(CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script))
     }
 
     private func runTemporaryMountTest(for config: VolumeConfig, password: String?) throws -> CommandResult {
@@ -466,11 +497,19 @@ public final class AppViewModel {
         return detail
     }
 
+    private func mountFailureMessage(for config: VolumeConfig, result: CommandResult) -> String {
+        if config.protocolType == .webdav, result.exitCode == 22 {
+            return "WebDAV connectivity passed, but macOS Finder mount failed with exit code 22."
+        }
+        return commandFailureMessage(result, action: "Mount")
+    }
+
     private static func appleScriptEscaped(_ value: String) -> String {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
+
 }
 
 enum AppViewModelError: Error, LocalizedError {

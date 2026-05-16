@@ -108,10 +108,19 @@ SWIFT
 hdiutil create -volname AutoVolume -srcfolder "$STAGING" -ov -format UDRW -fs HFS+ "$RW_DMG" >/dev/null
 attach_output="$(hdiutil attach "$RW_DMG" -readwrite)"
 device="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {print $1}')"
+volume_path="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {for (i=3; i<=NF; i++) {printf "%s%s", (i==3 ? "" : " "), $i}; print ""}')"
+if [[ -z "${volume_path:-}" || ! -d "$volume_path" ]]; then
+  volume_path="/Volumes/AutoVolume"
+fi
 
-osascript <<APPLESCRIPT &
+rm -rf "$volume_path/.fseventsd"
+chflags hidden "$volume_path/.background" >/dev/null 2>&1 || true
+SetFile -a V "$volume_path/.background" >/dev/null 2>&1 || true
+
+osascript <<APPLESCRIPT
 tell application "Finder"
-    tell disk "AutoVolume"
+    set volumeAlias to POSIX file "$volume_path" as alias
+    tell folder volumeAlias
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
@@ -121,8 +130,12 @@ tell application "Finder"
         set arrangement of theViewOptions to not arranged
         set icon size of theViewOptions to 96
         set background picture of theViewOptions to file ".background:background.png"
-        set position of item "AutoVolume.app" of container window to {160, 210}
-        set position of item "Applications" of container window to {480, 210}
+        try
+            set position of item "AutoVolume.app" of container window to {160, 210}
+        end try
+        try
+            set position of item "Applications" of container window to {480, 210}
+        end try
         try
             set position of item ".background" of container window to {590, 350}
         end try
@@ -130,28 +143,15 @@ tell application "Finder"
             set position of item ".fseventsd" of container window to {590, 350}
         end try
         update without registering applications
-        delay 1
+        delay 2
         close
     end tell
 end tell
 APPLESCRIPT
-osascript_pid=$!
-for _ in 1 2 3 4 5 6 7 8; do
-  if ! kill -0 "$osascript_pid" >/dev/null 2>&1; then
-    wait "$osascript_pid" || true
-    osascript_pid=""
-    break
-  fi
-  sleep 1
-done
-if [[ -n "${osascript_pid:-}" ]]; then
-  kill -9 "$osascript_pid" >/dev/null 2>&1 || true
-  wait "$osascript_pid" >/dev/null 2>&1 || true
-fi
 
-rm -rf "/Volumes/AutoVolume/.fseventsd"
-chflags hidden "/Volumes/AutoVolume/.background" >/dev/null 2>&1 || true
-SetFile -a V "/Volumes/AutoVolume/.background" >/dev/null 2>&1 || true
+rm -rf "$volume_path/.fseventsd"
+chflags hidden "$volume_path/.background" >/dev/null 2>&1 || true
+SetFile -a V "$volume_path/.background" >/dev/null 2>&1 || true
 sync
 hdiutil detach "$device" >/dev/null
 hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null
