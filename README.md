@@ -118,4 +118,4 @@ docs/
 
 ## License
 
-尚未指定许可证。发布到公开 GitHub 仓库前建议补充 License。
+本项目使用 [MIT License](LICENSE) 开源。
