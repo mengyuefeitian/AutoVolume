@@ -6,19 +6,22 @@ public final class AgentEngine {
     private let commandRunner: CommandRunner
     private let mountPlanner: MountPlanner
     private let mountExposure: MountExposure
+    private let validatesAfterMount: Bool
 
     public init(
         mountState: MountStateProvider,
         credentialStore: CredentialStore,
         commandRunner: CommandRunner,
         mountPlanner: MountPlanner,
-        mountExposure: MountExposure = MountExposure()
+        mountExposure: MountExposure = MountExposure(),
+        validatesAfterMount: Bool = false
     ) {
         self.mountState = mountState
         self.credentialStore = credentialStore
         self.commandRunner = commandRunner
         self.mountPlanner = mountPlanner
         self.mountExposure = mountExposure
+        self.validatesAfterMount = validatesAfterMount
     }
 
     public func check(_ config: VolumeConfig) throws -> VolumeStatus {
@@ -30,7 +33,7 @@ public final class AgentEngine {
 
     public func reconnect(_ config: VolumeConfig) throws -> VolumeStatus {
         guard config.isEnabled else { return .unmounted }
-        let mountPoint = mountPlanner.effectiveMountPoint(for: config)
+        let mountPoint = mountPlanner.unmountTarget(for: config)
         _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
         return try mount(config)
@@ -42,6 +45,9 @@ public final class AgentEngine {
         let result = try runMount(config: config, password: password)
         if result.exitCode == 0 {
             try mountExposure.expose(config: config, planner: mountPlanner)
+            guard !validatesAfterMount || mountState.isMounted(config: config) else {
+                return try retryAfterStaleMount(config: config, password: password)
+            }
             return .mounted
         }
         let message = result.stderr.isEmpty ? "Mount command failed with exit code \(result.exitCode)." : result.stderr
@@ -59,6 +65,22 @@ public final class AgentEngine {
         _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
         return try commandRunner.run(plan).redacting(secrets: [password])
+    }
+
+    private func retryAfterStaleMount(config: VolumeConfig, password: String?) throws -> VolumeStatus {
+        let mountPoint = mountPlanner.unmountTarget(for: config)
+        _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+        _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+        let result = try runMount(config: config, password: password)
+        guard result.exitCode == 0 else {
+            let message = result.stderr.isEmpty ? "Mount command failed with exit code \(result.exitCode)." : result.stderr
+            return .failed(message: message)
+        }
+        try mountExposure.expose(config: config, planner: mountPlanner)
+        guard mountState.isMounted(config: config) else {
+            return .failed(message: "Mount command succeeded, but the mounted volume did not respond. AutoVolume will retry on the next check.")
+        }
+        return .mounted
     }
 
     private func isOccupiedMountPointError(_ result: CommandResult) -> Bool {

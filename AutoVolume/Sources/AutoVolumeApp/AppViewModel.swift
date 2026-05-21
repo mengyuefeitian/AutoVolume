@@ -187,7 +187,7 @@ public final class AppViewModel {
         connectivityTester: ConnectivityTester = ConnectivityTester(),
         smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter(),
         alertStore: AlertStore = AlertStore(),
-        mountStateProvider: MountStateProvider = FileSystemMountStateProvider(validatesResponsiveness: false),
+        mountStateProvider: MountStateProvider = FileSystemMountStateProvider(healthCheckTimeout: 3, validatesResponsiveness: true),
         mountExposure: MountExposure = MountExposure()
     ) {
         self.configStore = configStore
@@ -316,7 +316,7 @@ public final class AppViewModel {
         if mountPlanner.shouldOpenFinderAfterMount(for: config) {
             let openResult = try openMountedVolume(config)
             if openResult.exitCode != 0 {
-                return "\(strings.mountSucceeded) Finder open failed: \(commandFailureMessage(openResult, action: "Finder"))"
+                throw AppViewModelError.commandFailed(finderOpenFailureMessage(openResult))
             }
         }
         return strings.mountSucceeded
@@ -397,6 +397,9 @@ public final class AppViewModel {
             throw AppViewModelError.commandFailed(mountFailureMessage(for: config, result: result))
         }
         try mountExposure.expose(config: config, planner: mountPlanner)
+        guard waitForMountedVolumeResponse(config) else {
+            throw AppViewModelError.commandFailed("Mount command succeeded, but the mounted volume did not respond.")
+        }
         try? alertStore.resolve(volumeID: config.id)
         refreshAlerts()
     }
@@ -413,6 +416,9 @@ public final class AppViewModel {
     private func openMountedVolume(_ config: VolumeConfig) throws -> CommandResult {
         let browsePath = mountPlanner.resolvedBrowsePath(for: config)
         Thread.sleep(forTimeInterval: 0.6)
+        guard PathHealthProbe(timeout: 3).isResponsive(path: browsePath) else {
+            return CommandResult(exitCode: 1, stdout: "", stderr: "Mounted folder is not responding at \(browsePath).")
+        }
         cleanupFinderWindows(for: config, resolvedBrowsePath: browsePath)
         return try commandRunner.run(mountPlanner.finderRevealPlan(for: config, resolvedBrowsePath: browsePath))
     }
@@ -474,14 +480,56 @@ public final class AppViewModel {
     private func runMountWithRecovery(for config: VolumeConfig, password: String?) throws -> CommandResult {
         let plan = try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true)
         let result = try commandRunner.run(plan).redacting(secrets: [password])
-        guard result.exitCode != 0, isOccupiedMountPointError(result) else {
+        if result.exitCode == 0 {
+            guard !mountedVolumeIsStale(config) else {
+                unmountStaleTarget(for: config)
+                let retryResult = try commandRunner.run(plan).redacting(secrets: [password])
+                guard retryResult.exitCode == 0 else { return retryResult }
+                return waitForMountedVolumeResponse(config)
+                    ? retryResult
+                    : CommandResult(exitCode: 1, stdout: retryResult.stdout, stderr: "Mount command succeeded, but the mounted volume did not respond after clearing a stale mount.")
+            }
+            return waitForMountedVolumeResponse(config)
+                ? result
+                : CommandResult(exitCode: 1, stdout: result.stdout, stderr: "Mount command succeeded, but the mounted volume did not respond.")
+        }
+
+        guard isOccupiedMountPointError(result) else {
             return result
         }
 
-        let mountPoint = mountPlanner.effectiveMountPoint(for: config)
+        unmountStaleTarget(for: config)
+        let retryResult = try commandRunner.run(plan).redacting(secrets: [password])
+        guard retryResult.exitCode == 0 else { return retryResult }
+        return waitForMountedVolumeResponse(config)
+            ? retryResult
+            : CommandResult(exitCode: 1, stdout: retryResult.stdout, stderr: "Mount command succeeded, but the mounted volume did not respond after clearing an occupied mount point.")
+    }
+
+    private func waitForMountedVolumeResponse(_ config: VolumeConfig) -> Bool {
+        for attempt in 0..<3 {
+            if mountedVolumeIsResponsive(config) {
+                return true
+            }
+            if attempt < 2 {
+                Thread.sleep(forTimeInterval: 0.8)
+            }
+        }
+        return false
+    }
+
+    private func mountedVolumeIsStale(_ config: VolumeConfig) -> Bool {
+        SystemMountTable().contains(config: config) && !mountedVolumeIsResponsive(config)
+    }
+
+    private func mountedVolumeIsResponsive(_ config: VolumeConfig) -> Bool {
+        PathHealthProbe(timeout: 3).isResponsive(path: mountPlanner.healthCheckPath(for: config))
+    }
+
+    private func unmountStaleTarget(for config: VolumeConfig) {
+        let mountPoint = mountPlanner.unmountTarget(for: config)
         _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
-        return try commandRunner.run(plan).redacting(secrets: [password])
     }
 
     private func isOccupiedMountPointError(_ result: CommandResult) -> Bool {
@@ -498,10 +546,29 @@ public final class AppViewModel {
     }
 
     private func mountFailureMessage(for config: VolumeConfig, result: CommandResult) -> String {
+        let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+        if config.protocolType == .webdav, detail.contains("-5014") {
+            switch language {
+            case .chinese:
+                return "macOS WebDAV/Finder 挂载服务返回 -5014。AutoVolume 已验证到这是系统挂载层异常，不是账号密码错误；请先退出 AutoVolume 并重启 macOS，重启后通常会立即恢复。"
+            case .english:
+                return "macOS WebDAV/Finder mount service returned -5014. This is a macOS mount-layer failure, not a credential error; quit AutoVolume and restart macOS, which usually clears it."
+            }
+        }
         if config.protocolType == .webdav, result.exitCode == 22 {
             return "WebDAV connectivity passed, but macOS Finder mount failed with exit code 22."
         }
         return commandFailureMessage(result, action: "Mount")
+    }
+
+    private func finderOpenFailureMessage(_ result: CommandResult) -> String {
+        let detail = commandFailureMessage(result, action: "Finder")
+        switch language {
+        case .chinese:
+            return "挂载后 Finder 无法打开目标目录：\(detail)"
+        case .english:
+            return "Mounted, but Finder could not open the target folder: \(detail)"
+        }
     }
 
     private static func appleScriptEscaped(_ value: String) -> String {

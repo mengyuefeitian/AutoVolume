@@ -163,6 +163,7 @@ func testMountPlanning() throws {
     try expect(MountPlanner().unmountTarget(for: smbNested) == MountPlanner().effectiveMountPoint(for: smbNested), "Nested SMB unmount should target the backing mount point")
     let webdavMountOutput = "https://mei@dav.example.com/base on /Volumes/base (webdav, nodev, nosuid, mounted by mei)"
     try expect(MountPlanner().unmountTarget(for: webdavRoot, mountTable: SystemMountTable(mountOutput: webdavMountOutput)) == "/Volumes/base", "WebDAV unmount should target the real mounted path")
+    try expect(MountPlanner().healthCheckPath(for: webdavRoot, mountTable: SystemMountTable(mountOutput: webdavMountOutput)) == "/Volumes/base", "WebDAV health check should use the real mounted path")
     try expect(MountPlanner().finderCleanupPaths(for: webdavRoot, resolvedBrowsePath: "/Volumes/base") == ["/Volumes/RootDAV", "/Volumes/base"], "Finder cleanup should include visible and resolved WebDAV paths once")
 }
 

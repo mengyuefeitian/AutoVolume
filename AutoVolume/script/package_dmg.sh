@@ -17,18 +17,20 @@ if [[ ! -d "$APP" ]]; then
 fi
 
 rm -rf "$STAGING" "$MOUNT_POINT" "$RW_DMG" "$DMG"
+for mounted_volume in /Volumes/AutoVolume*; do
+  if [[ -d "$mounted_volume" ]]; then
+    hdiutil detach "$mounted_volume" >/dev/null 2>&1 || true
+  fi
+done
 mkdir -p "$STAGING/.background"
 cp -R "$APP" "$STAGING/AutoVolume.app"
-/usr/bin/osascript <<APPLESCRIPT >/dev/null
-tell application "Finder"
-    make new alias file to POSIX file "/Applications" at POSIX file "$STAGING"
-end tell
-APPLESCRIPT
-if [[ -e "$STAGING/应用程序" ]]; then
-  mv "$STAGING/应用程序" "$STAGING/Applications"
-fi
+/bin/ln -s /Applications "$STAGING/Applications"
 cleanup() {
-  hdiutil detach "/Volumes/AutoVolume" >/dev/null 2>&1 || true
+  for mounted_volume in /Volumes/AutoVolume*; do
+    if [[ -d "$mounted_volume" ]]; then
+      hdiutil detach "$mounted_volume" >/dev/null 2>&1 || true
+    fi
+  done
   rm -rf "$STAGING" "$RW_DMG"
 }
 trap cleanup EXIT

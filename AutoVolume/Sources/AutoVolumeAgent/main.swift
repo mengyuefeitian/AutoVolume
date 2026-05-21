@@ -8,12 +8,13 @@ let store = JSONConfigStore()
 let credentialStore = EncryptedFileCredentialStore()
 let commandRunner = ProcessCommandRunner()
 let connectivityTester = ConnectivityTester()
-let mountStateProvider = FileSystemMountStateProvider(validatesResponsiveness: false)
+let mountStateProvider = FileSystemMountStateProvider(healthCheckTimeout: 3, validatesResponsiveness: true)
 let engine = AgentEngine(
     mountState: mountStateProvider,
     credentialStore: credentialStore,
     commandRunner: commandRunner,
-    mountPlanner: MountPlanner()
+    mountPlanner: MountPlanner(),
+    validatesAfterMount: true
 )
 let mountPlanner = MountPlanner()
 var scheduler = CheckScheduler()

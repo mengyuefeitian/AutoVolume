@@ -85,6 +85,18 @@ public struct MountPlanner {
         }
     }
 
+    public func healthCheckPath(for config: VolumeConfig, mountTable: SystemMountTable = SystemMountTable()) -> String {
+        if let exposedPath = exposedPathTarget(for: config) {
+            return exposedPath
+        }
+        switch config.protocolType {
+        case .webdav, .afp, .nfs:
+            return mountTable.mountPoint(for: config) ?? effectiveMountPoint(for: config)
+        case .smb:
+            return effectiveMountPoint(for: config)
+        }
+    }
+
     public func finderCleanupPaths(for config: VolumeConfig, resolvedBrowsePath: String) -> [String] {
         var paths: [String] = []
         for path in [config.mountPoint, effectiveMountPoint(for: config), browsePath(for: config), resolvedBrowsePath] {

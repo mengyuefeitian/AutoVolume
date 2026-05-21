@@ -25,23 +25,24 @@ public final class FileSystemMountStateProvider: MountStateProvider {
 
     public func isMounted(config: VolumeConfig) -> Bool {
         let mountURL = URL(fileURLWithPath: config.mountPoint)
+        let mountTable = SystemMountTable()
         guard let mountedURLs = fileManager.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: []) else {
             return false
         }
         if fileManager.fileExists(atPath: mountURL.path),
            mountedURLs.contains(where: { $0.standardizedFileURL.path == mountURL.standardizedFileURL.path }) {
-            return isResponsiveIfNeeded(config: config)
+            return isResponsiveIfNeeded(config: config, mountTable: mountTable)
         }
-        return SystemMountTable().contains(config: config) && isResponsiveIfNeeded(config: config)
+        return mountTable.contains(config: config) && isResponsiveIfNeeded(config: config, mountTable: mountTable)
     }
 
-    private func isResponsiveIfNeeded(config: VolumeConfig) -> Bool {
+    private func isResponsiveIfNeeded(config: VolumeConfig, mountTable: SystemMountTable) -> Bool {
         guard validatesResponsiveness else { return true }
-        return isResponsive(config: config)
+        return isResponsive(config: config, mountTable: mountTable)
     }
 
-    private func isResponsive(config: VolumeConfig) -> Bool {
-        let path = mountPlanner.exposedPathTarget(for: config) ?? mountPlanner.effectiveMountPoint(for: config)
+    private func isResponsive(config: VolumeConfig, mountTable: SystemMountTable) -> Bool {
+        let path = mountPlanner.healthCheckPath(for: config, mountTable: mountTable)
         return PathHealthProbe(timeout: healthCheckTimeout).isResponsive(path: path)
     }
 }
