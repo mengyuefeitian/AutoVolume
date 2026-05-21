@@ -19,11 +19,11 @@ AutoVolume 是一款轻量级 macOS 菜单栏工具，用于自动检查并恢�
 
 ## 下载和安装
 
-最新正式版本为 `0.1.37`，请从 GitHub Releases 下载：
+最新正式版本为 `0.1.38`，请从 GitHub Releases 下载：
 
 - Releases: https://github.com/mengyuefeitian/AutoVolume/releases
-- DMG: `AutoVolume-0.1.37.dmg`
-- ZIP: `AutoVolume-0.1.37.zip`
+- DMG: `AutoVolume-0.1.38.dmg`
+- ZIP: `AutoVolume-0.1.38.zip`
 
 安装方式：
 
@@ -77,7 +77,7 @@ cd AutoVolume
 
 ```bash
 cd AutoVolume
-./script/package_dmg.sh 0.1.37
+./script/package_dmg.sh 0.1.38
 ```
 
 ## 项目结构
@@ -95,6 +95,15 @@ docs/
 ```
 
 ## 发布说明
+
+### 0.1.38
+
+- 增加真实挂载点响应检测，避免 macOS 假挂载或僵尸挂载时仍显示成功。
+- 挂载命令返回成功后会验证目标目录是否可访问，必要时清理旧挂载点并重试。
+- Finder 无法打开目标目录时改为失败提示，不再显示“挂载成功”误导信息。
+- WebDAV 遇到 macOS Finder/DAVKit `-5014` 时显示明确的系统挂载层异常说明。
+- 修复 DMG 中 Applications 快捷方式在中文系统下变成“应用程序的替身 2”并乱位的问题。
+- 版本号提升到 `0.1.38`。
 
 ### 0.1.37
 
