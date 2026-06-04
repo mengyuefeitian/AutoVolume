@@ -269,6 +269,10 @@ public final class AppViewModel {
         refreshVolumeStatuses()
     }
 
+    public func refreshAlertsOnly() {
+        alerts = (try? alertStore.load()) ?? []
+    }
+
     public func clearAlerts() {
         try? alertStore.clear()
         refreshAlerts()
@@ -289,15 +293,19 @@ public final class AppViewModel {
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
+        AutoVolumeLogger.shared.info("Testing connection for \(config.name) \(config.protocolType.rawValue)")
         if config.protocolType == .webdav {
             try verifyConnectivity(for: config, password: password, action: "Connection test")
+            AutoVolumeLogger.shared.info("Connection test passed for \(config.name)")
             return strings.testSucceeded
         }
 
         let result = try runTemporaryMountTest(for: config, password: password)
         guard result.exitCode == 0 else {
+            AutoVolumeLogger.shared.warning("Connection test failed for \(config.name): \(commandFailureMessage(result, action: "Connection test"))")
             throw AppViewModelError.commandFailed(commandFailureMessage(result, action: "Connection test"))
         }
+        AutoVolumeLogger.shared.info("Connection test passed for \(config.name)")
         return strings.testSucceeded
     }
 
@@ -308,6 +316,7 @@ public final class AppViewModel {
     }
 
     public func mount(_ config: VolumeConfig, password: String? = nil) throws -> String {
+        AutoVolumeLogger.shared.info("Mount requested for \(config.name) \(config.protocolType.rawValue)")
         let storedPassword = try password ?? credentialStore.password(for: config.id)
         if config.protocolType == .smb {
             try smbPreferencesWriter.apply(options: config.smbOptions)
@@ -316,9 +325,11 @@ public final class AppViewModel {
         if mountPlanner.shouldOpenFinderAfterMount(for: config) {
             let openResult = try openMountedVolume(config)
             if openResult.exitCode != 0 {
+                AutoVolumeLogger.shared.warning("Finder open failed for \(config.name): \(commandFailureMessage(openResult, action: "Finder"))")
                 throw AppViewModelError.commandFailed(finderOpenFailureMessage(openResult))
             }
         }
+        AutoVolumeLogger.shared.info("Mount succeeded for \(config.name)")
         return strings.mountSucceeded
     }
 
@@ -333,17 +344,21 @@ public final class AppViewModel {
     }
 
     public func unmount(_ config: VolumeConfig) throws {
+        AutoVolumeLogger.shared.info("Unmount requested for \(config.name)")
         let mountPoint = mountPlanner.unmountTarget(for: config)
         let result = try commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         guard result.exitCode == 0 else {
             let forceResult = try commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
             if forceResult.exitCode != 0 {
+                AutoVolumeLogger.shared.warning("Unmount failed for \(config.name): \(commandFailureMessage(forceResult, action: "Unmount"))")
                 throw AppViewModelError.commandFailed(commandFailureMessage(forceResult, action: "Unmount"))
             }
             refreshVolumeStatuses()
+            AutoVolumeLogger.shared.info("Force unmount succeeded for \(config.name)")
             return
         }
         refreshVolumeStatuses()
+        AutoVolumeLogger.shared.info("Unmount succeeded for \(config.name)")
     }
 
     public func unmountAsync(_ config: VolumeConfig) async throws {

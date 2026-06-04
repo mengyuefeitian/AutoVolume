@@ -22,7 +22,6 @@ struct VolumeEditorView: View {
     @State private var message: String?
     @State private var isPasswordVisible = false
     @State private var isWorking = false
-    @Environment(\.dismissWindow) private var dismissWindow
 
     init(
         viewModel: AppViewModel,
@@ -51,10 +50,10 @@ struct VolumeEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
                         GridRow {
                             Text(viewModel.strings.name)
-                            TextField(viewModel.strings.name, text: $name)
+                            editorTextField(viewModel.strings.name, text: $name, focusesOnAppear: true)
                         }
                         GridRow {
                             Text(viewModel.strings.protocolLabel)
@@ -67,13 +66,13 @@ struct VolumeEditorView: View {
                         }
                         GridRow {
                             Text(viewModel.strings.server)
-                            TextField(viewModel.strings.server, text: $server)
+                            editorTextField(viewModel.strings.server, text: $server)
                         }
                         GridRow {
                             Text(viewModel.strings.remotePath)
                                 .gridCellAnchor(.topLeading)
                             VStack(alignment: .leading, spacing: 4) {
-                                TextField(viewModel.strings.remotePath, text: $remotePath)
+                                editorTextField(viewModel.strings.remotePath, text: $remotePath)
                                 Text(viewModel.strings.remotePathHelp)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -82,15 +81,15 @@ struct VolumeEditorView: View {
                         }
                         GridRow {
                             Text(viewModel.strings.username)
-                            TextField(viewModel.strings.username, text: $username)
+                            editorTextField(viewModel.strings.username, text: $username)
                         }
                         GridRow {
                             Text(viewModel.strings.password)
                             HStack {
                                 if isPasswordVisible {
-                                    TextField(viewModel.strings.password, text: $password)
+                                    editorTextField(viewModel.strings.password, text: $password)
                                 } else {
-                                    SecureField(viewModel.strings.password, text: $password)
+                                    editorTextField(viewModel.strings.password, text: $password, isSecure: true)
                                 }
                                 Button {
                                     isPasswordVisible.toggle()
@@ -103,7 +102,7 @@ struct VolumeEditorView: View {
                         }
                         GridRow {
                             Text(viewModel.strings.mountPoint)
-                            TextField(viewModel.strings.mountPoint, text: $mountPoint)
+                            editorTextField(viewModel.strings.mountPoint, text: $mountPoint)
                         }
                     }
 
@@ -155,9 +154,10 @@ struct VolumeEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 Button(viewModel.strings.cancel) {
+                    AutoVolumeLogger.shared.info("Cancel button selected")
                     onCancel()
-                    dismissWindow(id: "volume-editor")
                 }
+                .buttonStyle(.bordered)
                 .disabled(isWorking)
                 Spacer()
                 Button(viewModel.strings.test) {
@@ -167,6 +167,7 @@ struct VolumeEditorView: View {
                         }
                     }
                 }
+                .buttonStyle(.bordered)
                 .disabled(isWorking)
                 Button(viewModel.strings.save) {
                     Task {
@@ -176,6 +177,7 @@ struct VolumeEditorView: View {
                         }
                     }
                 }
+                .buttonStyle(.bordered)
                 .disabled(isWorking)
                 Button(viewModel.strings.saveAndMount) {
                     Task {
@@ -190,6 +192,7 @@ struct VolumeEditorView: View {
                         }
                     }
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(isWorking)
             }
@@ -197,7 +200,6 @@ struct VolumeEditorView: View {
             .padding(.bottom, 14)
         }
         .padding()
-        .background(FloatingWindowAccessor())
     }
 
     private func makeConfig() -> VolumeConfig {
@@ -230,6 +232,17 @@ struct VolumeEditorView: View {
         return trimmedMountPoint
     }
 
+    private func editorTextField(
+        _ placeholder: String,
+        text: Binding<String>,
+        isSecure: Bool = false,
+        focusesOnAppear: Bool = false
+    ) -> some View {
+        AppKitTextField(placeholder, text: text, isSecure: isSecure, focusesOnAppear: focusesOnAppear)
+            .frame(height: 34)
+            .padding(.vertical, 3)
+    }
+
     @MainActor
     private func runAsync(status: String, closeOnSuccess: Bool, operation: @escaping () async throws -> String) async {
         isWorking = true
@@ -239,7 +252,7 @@ struct VolumeEditorView: View {
             message = result
             onSaved(result)
             if closeOnSuccess {
-                dismissWindow(id: "volume-editor")
+                onCancel()
             }
         } catch {
             message = error.localizedDescription
@@ -248,27 +261,92 @@ struct VolumeEditorView: View {
     }
 }
 
-private struct FloatingWindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
-            window.level = .floating
-            window.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
-            window.hidesOnDeactivate = false
-            window.isReleasedWhenClosed = false
+enum EditorInputActivation {
+    static func begin() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows
+                .first { $0.identifier?.rawValue == "volume-editor" }?
+                .makeKeyAndOrderFront(nil)
         }
-        return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            guard let window = nsView.window else { return }
-            window.identifier = NSUserInterfaceItemIdentifier("volume-editor")
-            window.level = .floating
-            window.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
-            window.hidesOnDeactivate = false
+    static func end() {
+        NSApp.setActivationPolicy(.accessory)
+    }
+}
+
+private struct AppKitTextField: NSViewRepresentable {
+    var placeholder: String
+    @Binding var text: String
+    var isSecure = false
+    var focusesOnAppear = false
+
+    init(_ placeholder: String, text: Binding<String>, isSecure: Bool = false, focusesOnAppear: Bool = false) {
+        self.placeholder = placeholder
+        _text = text
+        self.isSecure = isSecure
+        self.focusesOnAppear = focusesOnAppear
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = isSecure ? NSSecureTextField() : NSTextField()
+        field.placeholderString = placeholder
+        field.stringValue = text
+        field.delegate = context.coordinator
+        field.isBordered = true
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.drawsBackground = true
+        field.isEditable = true
+        field.isSelectable = true
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.font = .systemFont(ofSize: NSFont.systemFontSize)
+        field.controlSize = .large
+        field.wantsLayer = true
+        field.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.75).cgColor
+        field.layer?.borderWidth = 1
+        field.layer?.cornerRadius = 6
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if focusesOnAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak field] in
+                guard let field, let window = field.window else { return }
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(field)
+            }
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.placeholderString != placeholder {
+            nsView.placeholderString = placeholder
+        }
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.75).cgColor
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding private var text: String
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text = field.stringValue
         }
     }
 }

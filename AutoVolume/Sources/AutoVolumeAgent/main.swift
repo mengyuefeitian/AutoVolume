@@ -23,6 +23,7 @@ var networkFailedVolumeIDs = Set<UUID>()
 
 func runOnce() {
     guard appSessionIsActive() else {
+        AutoVolumeLogger.shared.info("Agent session is inactive; cleaning up")
         cleanupOrphanedLaunchAgent()
         exit(0)
     }
@@ -31,6 +32,7 @@ func runOnce() {
     do {
         configs = try store.load()
     } catch {
+        AutoVolumeLogger.shared.error("Agent config load error: \(error.localizedDescription)")
         fputs("AutoVolumeAgent config error: \(error)\n", stderr)
         return
     }
@@ -46,6 +48,7 @@ func runOnce() {
             guard connectivity.isReachable else {
                 networkFailedVolumeIDs.insert(config.id)
                 scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, retryInterval: 60, now: now))
+                AutoVolumeLogger.shared.warning("Server is not reachable for \(config.name): \(connectivity.message ?? "network unavailable")")
                 try? alertStore.record(volumeID: config.id, volumeName: config.name, message: connectivity.message ?? "Server is not reachable. AutoVolume will retry after the network returns.", date: now)
                 continue
             }
@@ -68,8 +71,10 @@ func runOnce() {
             case .mounted:
                 networkFailedVolumeIDs.remove(config.id)
                 try? alertStore.resolve(volumeID: config.id)
+                AutoVolumeLogger.shared.info("Agent check mounted for \(config.name)")
             case .failed(let message):
                 try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
+                AutoVolumeLogger.shared.warning("Agent check failed for \(config.name): \(message)")
             case .unmounted, .checking:
                 break
             }
@@ -77,6 +82,7 @@ func runOnce() {
             scheduler.markChecked(volumeID: config.id, at: checkedDate(for: error, interval: config.checkIntervalSeconds, now: now))
             let message = CommandResult.redacted(error.localizedDescription)
             try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
+            AutoVolumeLogger.shared.error("Agent mount error for \(config.name): \(message)")
             fputs("AutoVolumeAgent mount error for \(config.name): \(message)\n", stderr)
         }
     }

@@ -24,6 +24,7 @@ swiftc \
   Sources/AutoVolumeShared/ConfigStore.swift \
   Sources/AutoVolumeShared/CredentialStore.swift \
   Sources/AutoVolumeShared/CommandRunner.swift \
+  Sources/AutoVolumeShared/AutoVolumeLogger.swift \
   Sources/AutoVolumeShared/MountPlanning.swift \
   Sources/AutoVolumeShared/MountExposure.swift \
   Sources/AutoVolumeShared/MountState.swift \
@@ -61,6 +62,7 @@ swiftc \
   -Xlinker @executable_path/../Frameworks \
   -o "$BUILD/AutoVolumeApp" \
   Sources/AutoVolumeApp/AutoVolumeApp.swift \
+  Sources/AutoVolumeApp/StatusBarController.swift \
   Sources/AutoVolumeApp/LaunchAgentInstaller.swift \
   Sources/AutoVolumeApp/AppViewModel.swift \
   Sources/AutoVolumeApp/ContentView.swift \

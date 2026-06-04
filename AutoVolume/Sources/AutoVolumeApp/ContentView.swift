@@ -4,9 +4,10 @@ import AutoVolumeShared
 
 struct ContentView: View {
     @Bindable var viewModel: AppViewModel
+    let onAdd: () -> Void
+    let onEdit: (VolumeConfig) -> Void
     @State private var message: String?
     @State private var workingVolumeIDs: Set<VolumeConfig.ID> = []
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -41,9 +42,7 @@ struct ContentView: View {
                 .help(viewModel.strings.alerts)
                 Button {
                     hideListWindow()
-                    viewModel.beginAddingVolume()
-                    openWindow(id: "volume-editor")
-                    bringEditorForward()
+                    onAdd()
                 } label: {
                     Label(viewModel.strings.add, systemImage: "plus")
                 }
@@ -98,9 +97,7 @@ struct ContentView: View {
                         .disabled(workingVolumeIDs.contains(volume.id))
                         Button {
                             hideListWindow()
-                            viewModel.beginEditing(volume)
-                            openWindow(id: "volume-editor")
-                            bringEditorForward()
+                            onEdit(volume)
                         } label: {
                             Image(systemName: "pencil")
                         }
@@ -134,29 +131,10 @@ struct ContentView: View {
         .padding(22)
         .background(.regularMaterial)
         .onAppear {
-            viewModel.refreshAlerts()
+            viewModel.refreshAlertsOnly()
         }
         .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
-            viewModel.refreshAlerts()
-        }
-    }
-
-    private func bringEditorForward() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            focusEditorWindow()
-        }
-    }
-
-    private func focusEditorWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        let editorWindow = NSApp.windows.first { $0.identifier?.rawValue == "volume-editor" }
-        if let editorWindow {
-            editorWindow.level = .floating
-            editorWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
-            editorWindow.hidesOnDeactivate = false
-            editorWindow.makeKeyAndOrderFront(nil)
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
+            viewModel.refreshAlertsOnly()
         }
     }
 

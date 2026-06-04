@@ -2,12 +2,20 @@ import SwiftUI
 import AppKit
 import AutoVolumeShared
 
+@MainActor
+let sharedAutoVolumeViewModel = AppViewModel()
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusBarController: StatusBarController?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        statusBarController = StatusBarController(viewModel: sharedAutoVolumeViewModel)
+        AutoVolumeLogger.shared.info("AutoVolume launched")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        AutoVolumeLogger.shared.info("AutoVolume terminating")
         LaunchAgentInstaller.stop()
     }
 }
@@ -15,7 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct AutoVolumeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var viewModel = AppViewModel()
 
     init() {
         DispatchQueue.global(qos: .utility).async {
@@ -24,22 +31,8 @@ struct AutoVolumeApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(viewModel.productName, systemImage: "externaldrive.connected.to.line.below") {
-            ContentView(viewModel: viewModel)
-                .frame(width: 620, height: 520)
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
-
-        Window(viewModel.productName, id: "volume-editor") {
-            VolumeEditorView(
-                viewModel: viewModel,
-                volume: viewModel.editorVolume,
-                onCancel: {},
-                onSaved: { _ in }
-            )
-            .id(viewModel.editorSessionID)
-            .frame(width: 560, height: 430)
-        }
-        .defaultSize(width: 560, height: 430)
     }
 }

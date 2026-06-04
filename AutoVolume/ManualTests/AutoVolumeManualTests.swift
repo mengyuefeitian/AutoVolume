@@ -227,6 +227,30 @@ func testPathHealthProbe() throws {
     try expect(!PathHealthProbe(timeout: 1).isResponsive(path: directory.appendingPathComponent("missing").path), "Missing path should be unhealthy")
 }
 
+func testAutoVolumeLoggerRetentionAndSizeLimit() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let logger = AutoVolumeLogger(directory: directory, retentionInterval: 60, maxBytes: 160)
+    let now = Date(timeIntervalSince1970: 1_000)
+
+    logger.write(level: "INFO", message: "old line", date: now.addingTimeInterval(-120))
+    logger.write(level: "INFO", message: "new line 1", date: now)
+    logger.write(level: "INFO", message: "new line 2 with //user:secret@example.test/share", date: now.addingTimeInterval(1))
+    try logger.prune(now: now.addingTimeInterval(2))
+
+    let logText = try String(contentsOf: logger.logFileURL, encoding: .utf8)
+    try expect(!logText.contains("old line"), "Logger should remove entries older than the retention window")
+    try expect(logText.contains("new line"), "Logger should keep recent entries")
+    try expect(!logText.contains("secret"), "Logger should redact URL passwords")
+    guard let newestIndex = logText.range(of: "new line 2")?.lowerBound,
+          let olderIndex = logText.range(of: "new line 1")?.lowerBound else {
+        throw ManualTestFailure.failed("Logger output missing recent lines")
+    }
+    try expect(newestIndex < olderIndex, "Logger should show newest entries first")
+    let size = (try FileManager.default.attributesOfItem(atPath: logger.logFileURL.path)[.size] as? NSNumber)?.intValue ?? 0
+    try expect(size <= 160, "Logger should keep the file under the configured size limit")
+}
+
 func testAgentEngineDecisions() throws {
     let testMountRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: testMountRoot) }
@@ -376,6 +400,7 @@ let tests: [(String, () throws -> Void)] = [
     ("ConnectivityPlanning", testConnectivityPlanning),
     ("MountExposure", testMountExposureCreatesSubdirectoryLink),
     ("PathHealthProbe", testPathHealthProbe),
+    ("AutoVolumeLogger", testAutoVolumeLoggerRetentionAndSizeLimit),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
     ("FinderRevealPlanning", testFinderRevealPlanning),

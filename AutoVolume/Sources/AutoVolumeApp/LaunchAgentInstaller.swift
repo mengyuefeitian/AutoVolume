@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import AutoVolumeShared
 
 enum LaunchAgentInstaller {
     private static let label = "com.autovolume.agent"
@@ -22,11 +23,13 @@ enum LaunchAgentInstaller {
             try plist(agentPath: agentURL.path).write(to: plistURL, atomically: true, encoding: .utf8)
             restartAgent(plistURL: plistURL)
         } catch {
+            AutoVolumeLogger.shared.error("LaunchAgent install error: \(error.localizedDescription)")
             fputs("AutoVolume LaunchAgent install error: \(error)\n", stderr)
         }
     }
 
     static func stop() {
+        AutoVolumeLogger.shared.info("Stopping AutoVolumeAgent")
         let domain = "gui/\(getuid())"
         guard let launchAgentsDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.appendingPathComponent("LaunchAgents", isDirectory: true) else {
             return
@@ -57,9 +60,9 @@ enum LaunchAgentInstaller {
             <key>RunAtLoad</key>
             <true/>
             <key>StandardOutPath</key>
-            <string>/tmp/autovolume-agent.log</string>
+            <string>/dev/null</string>
             <key>StandardErrorPath</key>
-            <string>/tmp/autovolume-agent.err</string>
+            <string>/dev/null</string>
         </dict>
         </plist>
         """
