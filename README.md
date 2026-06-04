@@ -23,6 +23,7 @@ AutoVolume 是一款轻量级 macOS 菜单栏工具，用于自动检查并恢�
 
 最新正式版本为 `0.1.45`，请从 GitHub Releases 下载：
 
+- 发布页: https://mengyuefeitian.github.io/AutoVolume/
 - Releases: https://github.com/mengyuefeitian/AutoVolume/releases
 - DMG: `AutoVolume-0.1.45.dmg`
 - ZIP: `AutoVolume-0.1.45.zip`
