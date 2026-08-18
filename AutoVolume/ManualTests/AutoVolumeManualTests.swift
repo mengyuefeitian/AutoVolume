@@ -153,8 +153,11 @@ func testMountPlanning() throws {
     try expect(quietWebDAVPlan.standardInput?.contains("mount_webdav") == false, "WebDAV quiet mount must not use mount_webdav/expect")
     let webdavRootNativeURL = try MountPlanner().remoteURLString(for: webdavRoot)
     try expect(webdavRootNativeURL == "https://dav.example.com/base", "WebDAV native mount URL should preserve the configured server root")
-    try expect(MountPlanner().shouldOpenFinderAfterMount(for: webdavRoot), "WebDAV should open Finder after cleanup so the user lands in the real mounted folder")
-    try expect(MountPlanner().shouldOpenFinderAfterMount(for: smb), "Quiet SMB mount should still reveal the mounted folder")
+    let isolatedSettingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: isolatedSettingsDirectory) }
+    let defaultSettingsPlanner = MountPlanner(settingsStore: JSONAppSettingsStore(directory: isolatedSettingsDirectory))
+    try expect(defaultSettingsPlanner.shouldOpenFinderAfterMount(for: webdavRoot), "WebDAV should open Finder after cleanup so the user lands in the real mounted folder")
+    try expect(defaultSettingsPlanner.shouldOpenFinderAfterMount(for: smb), "Quiet SMB mount should still reveal the mounted folder")
 
     let unmountPlan = MountPlanner().unmountPlan(mountPoint: "/Volumes/Team")
     try expect(unmountPlan == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["unmount", "/Volumes/Team"]), "Unmount plan mismatch")
@@ -353,6 +356,68 @@ func testAlertStore() throws {
     try expect(resolvedAlerts == [], "AlertStore should resolve alerts")
 }
 
+func testAutoVolumeLoggerWritesLocalTimeZone() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let logger = AutoVolumeLogger(directory: directory)
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+
+    logger.write(level: "INFO", message: "tz check", date: date)
+
+    let localFormatter = ISO8601DateFormatter()
+    localFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    localFormatter.timeZone = .current
+    let expectedPrefix = localFormatter.string(from: date)
+    let logText = try String(contentsOf: logger.logFileURL, encoding: .utf8)
+    try expect(logText.hasPrefix(expectedPrefix), "Logger should write timestamps in the local time zone, expected prefix \(expectedPrefix) in \(logText)")
+}
+
+func testAppSettingsStoreDefaultsAndRoundTrip() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = JSONAppSettingsStore(directory: directory)
+
+    let defaults = try store.load()
+    try expect(defaults.logLevel == .info, "Default log level should be info")
+    try expect(defaults.openFinderAfterMount == true, "Default openFinderAfterMount should be true")
+
+    let settings = AppSettings(logLevel: .error, openFinderAfterMount: false)
+    try store.save(settings)
+    let loaded = try store.load()
+    try expect(loaded == settings, "AppSettingsStore should round-trip saved settings")
+}
+
+func testAutoVolumeLoggerFiltersByLogLevel() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let settingsStore = JSONAppSettingsStore(directory: directory)
+    try settingsStore.save(AppSettings(logLevel: .warning))
+    let logger = AutoVolumeLogger(directory: directory, settingsStore: settingsStore)
+
+    logger.info("info message")
+    logger.warning("warning message")
+    logger.error("error message")
+
+    let logText = try String(contentsOf: logger.logFileURL, encoding: .utf8)
+    try expect(!logText.contains("info message"), "Logger should suppress messages below the configured level")
+    try expect(logText.contains("warning message"), "Logger should keep messages at the configured level")
+    try expect(logText.contains("error message"), "Logger should keep messages above the configured level")
+}
+
+func testMountPlannerShouldOpenFinderAfterMountRespectsSetting() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let config = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
+
+    let defaultPlanner = MountPlanner(settingsStore: JSONAppSettingsStore(directory: directory))
+    try expect(defaultPlanner.shouldOpenFinderAfterMount(for: config), "Default setting should open Finder after mount")
+
+    let disabledSettingsStore = JSONAppSettingsStore(directory: directory)
+    try disabledSettingsStore.save(AppSettings(openFinderAfterMount: false))
+    let disabledPlanner = MountPlanner(settingsStore: disabledSettingsStore)
+    try expect(!disabledPlanner.shouldOpenFinderAfterMount(for: config), "Disabled setting should not open Finder after mount")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -405,7 +470,11 @@ let tests: [(String, () throws -> Void)] = [
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
     ("FinderRevealPlanning", testFinderRevealPlanning),
     ("CheckScheduler", testCheckScheduler),
-    ("AlertStore", testAlertStore)
+    ("AlertStore", testAlertStore),
+    ("AutoVolumeLogger local time zone", testAutoVolumeLoggerWritesLocalTimeZone),
+    ("AppSettingsStore", testAppSettingsStoreDefaultsAndRoundTrip),
+    ("AutoVolumeLogger level filtering", testAutoVolumeLoggerFiltersByLogLevel),
+    ("MountPlanner shouldOpenFinderAfterMount", testMountPlannerShouldOpenFinderAfterMountRespectsSetting)
 ]
 
 do {

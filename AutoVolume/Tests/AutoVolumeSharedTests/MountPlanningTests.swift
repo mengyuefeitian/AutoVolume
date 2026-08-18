@@ -26,4 +26,24 @@ final class MountPlanningTests: XCTestCase {
         XCTAssertEqual(plan.executable, "/usr/sbin/diskutil")
         XCTAssertEqual(plan.arguments, ["unmount", "/Volumes/Team"])
     }
+
+    func testShouldOpenFinderAfterMountDefaultsToTrue() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let config = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
+        let planner = MountPlanner(settingsStore: JSONAppSettingsStore(directory: directory))
+
+        XCTAssertTrue(planner.shouldOpenFinderAfterMount(for: config))
+    }
+
+    func testShouldOpenFinderAfterMountRespectsDisabledSetting() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let settingsStore = JSONAppSettingsStore(directory: directory)
+        try settingsStore.save(AppSettings(openFinderAfterMount: false))
+        let config = VolumeConfig(name: "Team", protocolType: .smb, server: "nas.local", remotePath: "team", username: "mei", mountPoint: "/Volumes/Team", checkIntervalSeconds: 60, isEnabled: true)
+        let planner = MountPlanner(settingsStore: settingsStore)
+
+        XCTAssertFalse(planner.shouldOpenFinderAfterMount(for: config))
+    }
 }

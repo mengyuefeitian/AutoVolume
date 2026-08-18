@@ -12,7 +12,11 @@ public enum MountPlanningError: Error, Equatable, LocalizedError {
 }
 
 public struct MountPlanner {
-    public init() {}
+    private let settingsStore: AppSettingsStore
+
+    public init(settingsStore: AppSettingsStore = JSONAppSettingsStore()) {
+        self.settingsStore = settingsStore
+    }
 
     public func mountPlan(for config: VolumeConfig, password: String?, suppressesUserInterface: Bool = false) throws -> CommandPlan {
         if suppressesUserInterface {
@@ -60,7 +64,7 @@ public struct MountPlanner {
     }
 
     public func shouldOpenFinderAfterMount(for _: VolumeConfig) -> Bool {
-        true
+        ((try? settingsStore.load()) ?? AppSettings()).openFinderAfterMount
     }
 
     public func unmountTarget(for config: VolumeConfig) -> String {

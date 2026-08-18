@@ -8,13 +8,15 @@ public final class AutoVolumeLogger {
     public let retentionInterval: TimeInterval
     public let maxBytes: Int
 
+    private let settingsStore: AppSettingsStore
     private let lock = NSLock()
     private let calendar = ISO8601DateFormatter()
 
     public init(
         directory: URL? = nil,
         retentionInterval: TimeInterval = 24 * 60 * 60,
-        maxBytes: Int = 10 * 1024 * 1024
+        maxBytes: Int = 10 * 1024 * 1024,
+        settingsStore: AppSettingsStore? = nil
     ) {
         let baseDirectory = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -23,7 +25,9 @@ public final class AutoVolumeLogger {
         self.logFileURL = baseDirectory.appendingPathComponent("AutoVolume.log")
         self.retentionInterval = retentionInterval
         self.maxBytes = maxBytes
+        self.settingsStore = settingsStore ?? JSONAppSettingsStore(directory: baseDirectory)
         calendar.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        calendar.timeZone = .current
     }
 
     public var logDirectoryURL: URL {
@@ -31,15 +35,23 @@ public final class AutoVolumeLogger {
     }
 
     public func info(_ message: String) {
+        guard isEnabled(.info) else { return }
         write(level: "INFO", message: message)
     }
 
     public func warning(_ message: String) {
+        guard isEnabled(.warning) else { return }
         write(level: "WARN", message: message)
     }
 
     public func error(_ message: String) {
+        guard isEnabled(.error) else { return }
         write(level: "ERROR", message: message)
+    }
+
+    private func isEnabled(_ level: LogLevel) -> Bool {
+        let threshold = (try? settingsStore.load())?.logLevel ?? .info
+        return level >= threshold
     }
 
     public func write(level: String, message: String, date: Date = Date()) {

@@ -16,4 +16,16 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(try configStore.load(), [config])
         XCTAssertEqual(try credentialStore.password(for: config.id), "secret")
     }
+
+    func testUpdateSettingsPersistsToSettingsStore() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let settingsStore = JSONAppSettingsStore(directory: directory)
+        let viewModel = AppViewModel(credentialStore: InMemoryCredentialStore(), settingsStore: settingsStore)
+
+        viewModel.updateSettings(AppSettings(logLevel: .error, openFinderAfterMount: false))
+
+        XCTAssertEqual(viewModel.settings, AppSettings(logLevel: .error, openFinderAfterMount: false))
+        XCTAssertEqual(try settingsStore.load(), AppSettings(logLevel: .error, openFinderAfterMount: false))
+    }
 }

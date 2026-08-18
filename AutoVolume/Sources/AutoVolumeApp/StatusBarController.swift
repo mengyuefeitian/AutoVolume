@@ -8,6 +8,7 @@ final class StatusBarController: NSObject {
     private let popover = NSPopover()
     private let viewModel: AppViewModel
     private let editorController = EditorWindowController()
+    private let settingsController = SettingsWindowController()
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
@@ -66,6 +67,7 @@ final class StatusBarController: NSObject {
     private func showContextMenu() {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: localized("查看日志", "View Logs"), action: #selector(openLogs), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: localized("设置", "Settings"), action: #selector(openSettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: localized("关于", "About"), action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: localized("退出", "Quit"), action: #selector(quit), keyEquivalent: "q"))
@@ -96,6 +98,14 @@ final class StatusBarController: NSObject {
             AutoVolumeLogger.shared.info("Opened log directory")
         } catch {
             AutoVolumeLogger.shared.error("Open log directory failed: \(error.localizedDescription)")
+        }
+    }
+
+    @objc private func openSettings() {
+        AutoVolumeLogger.shared.info("Opened settings")
+        let viewModel = viewModel
+        DispatchQueue.main.async { [weak self] in
+            self?.settingsController.show(viewModel: viewModel)
         }
     }
 
@@ -180,5 +190,38 @@ private final class EditorWindowController: NSObject, NSWindowDelegate {
         window?.orderOut(nil)
         EditorInputActivation.end()
         AutoVolumeLogger.shared.info("Closed editor")
+    }
+}
+
+@MainActor
+private final class SettingsWindowController: NSObject, NSWindowDelegate {
+    private var window: NSWindow?
+
+    func show(viewModel: AppViewModel) {
+        let root = SettingsView(viewModel: viewModel)
+        let hostingController = NSHostingController(rootView: root)
+        let settingsWindow = window ?? NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 320),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: true
+        )
+        settingsWindow.contentViewController = hostingController
+        settingsWindow.delegate = self
+        settingsWindow.identifier = NSUserInterfaceItemIdentifier("settings")
+        settingsWindow.title = viewModel.language == .chinese ? "设置" : "Settings"
+        settingsWindow.level = .floating
+        settingsWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
+        settingsWindow.hidesOnDeactivate = false
+        settingsWindow.isReleasedWhenClosed = false
+        settingsWindow.center()
+        settingsWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window = settingsWindow
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        window?.orderOut(nil)
+        return false
     }
 }

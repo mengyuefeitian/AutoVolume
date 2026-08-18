@@ -21,12 +21,12 @@ AutoVolume 是一款轻量级 macOS 菜单栏工具，用于自动检查并恢�
 
 ## 下载和安装
 
-最新正式版本为 `0.1.45`，请从 GitHub Releases 下载：
+最新正式版本为 `0.1.47`，请从 GitHub Releases 下载：
 
 - 发布页: https://mengyuefeitian.github.io/AutoVolume/
 - Releases: https://github.com/mengyuefeitian/AutoVolume/releases
-- DMG: `AutoVolume-0.1.45.dmg`
-- ZIP: `AutoVolume-0.1.45.zip`
+- DMG: `AutoVolume-0.1.47.dmg`
+- ZIP: `AutoVolume-0.1.47.zip`
 
 安装方式：
 
@@ -80,7 +80,7 @@ cd AutoVolume
 
 ```bash
 cd AutoVolume
-./script/package_dmg.sh 0.1.45
+./script/package_dmg.sh 0.1.47
 ```
 
 ## 项目结构
@@ -98,6 +98,13 @@ docs/
 ```
 
 ## 发布说明
+
+### 0.1.47
+
+- 新增任务栏右键菜单「设置」，可调整日志错误级别（全部 / 警告及以上 / 仅错误），低于所选级别的日志不再写入文件；日志文件大小限制不变。
+- 新增开关：自动重连成功后是否自动在 Finder 中打开（默认开），同时影响手动挂载和自动挂载/重连。
+- 修复日志时间戳使用 UTC 而非本地时区的问题，现在与系统时钟一致，便于排查问题发生时间。
+- 版本号提升到 `0.1.47`。
 
 ### 0.1.45
 

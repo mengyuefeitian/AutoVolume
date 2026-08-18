@@ -161,6 +161,7 @@ public final class AppViewModel {
     public var selectedVolumeID: VolumeConfig.ID?
     public var editorVolume: VolumeConfig?
     public var editorSessionID = UUID()
+    public private(set) var settings: AppSettings
     public var language: AppLanguage {
         didSet {
             UserDefaults.standard.set(language.rawValue, forKey: Self.languageDefaultsKey)
@@ -176,6 +177,7 @@ public final class AppViewModel {
     private let alertStore: AlertStore
     private let mountStateProvider: MountStateProvider
     private let mountExposure: MountExposure
+    private let settingsStore: AppSettingsStore
 
     private static let languageDefaultsKey = "AutoVolume.language"
 
@@ -188,7 +190,8 @@ public final class AppViewModel {
         smbPreferencesWriter: SMBPreferencesWriter = SMBPreferencesWriter(),
         alertStore: AlertStore = AlertStore(),
         mountStateProvider: MountStateProvider = FileSystemMountStateProvider(healthCheckTimeout: 3, validatesResponsiveness: true),
-        mountExposure: MountExposure = MountExposure()
+        mountExposure: MountExposure = MountExposure(),
+        settingsStore: AppSettingsStore = JSONAppSettingsStore()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
@@ -199,8 +202,10 @@ public final class AppViewModel {
         self.alertStore = alertStore
         self.mountStateProvider = mountStateProvider
         self.mountExposure = mountExposure
+        self.settingsStore = settingsStore
         self.volumes = (try? configStore.load()) ?? []
         self.alerts = (try? alertStore.load()) ?? []
+        self.settings = (try? settingsStore.load()) ?? AppSettings()
         if let rawLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey),
            let savedLanguage = AppLanguage(rawValue: rawLanguage) {
             self.language = savedLanguage
@@ -262,6 +267,16 @@ public final class AppViewModel {
         try credentialStore.deletePassword(for: config.id)
         try? alertStore.resolve(volumeID: config.id)
         refreshAlerts()
+    }
+
+    public func updateSettings(_ newSettings: AppSettings) {
+        do {
+            try settingsStore.save(newSettings)
+            settings = newSettings
+            AutoVolumeLogger.shared.info("Settings updated: logLevel=\(newSettings.logLevel), openFinderAfterMount=\(newSettings.openFinderAfterMount)")
+        } catch {
+            AutoVolumeLogger.shared.error("Settings save failed: \(error.localizedDescription)")
+        }
     }
 
     public func refreshAlerts() {

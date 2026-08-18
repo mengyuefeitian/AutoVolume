@@ -25,6 +25,7 @@ swiftc \
   Sources/AutoVolumeShared/CredentialStore.swift \
   Sources/AutoVolumeShared/CommandRunner.swift \
   Sources/AutoVolumeShared/AutoVolumeLogger.swift \
+  Sources/AutoVolumeShared/AppSettings.swift \
   Sources/AutoVolumeShared/MountPlanning.swift \
   Sources/AutoVolumeShared/MountExposure.swift \
   Sources/AutoVolumeShared/MountState.swift \
@@ -66,7 +67,8 @@ swiftc \
   Sources/AutoVolumeApp/LaunchAgentInstaller.swift \
   Sources/AutoVolumeApp/AppViewModel.swift \
   Sources/AutoVolumeApp/ContentView.swift \
-  Sources/AutoVolumeApp/VolumeEditorView.swift
+  Sources/AutoVolumeApp/VolumeEditorView.swift \
+  Sources/AutoVolumeApp/SettingsView.swift
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"

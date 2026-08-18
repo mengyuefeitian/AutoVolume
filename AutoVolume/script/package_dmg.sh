@@ -35,7 +35,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-swift - "$BACKGROUND" "$ARROW_SOURCE" <<'SWIFT'
+BACKGROUND_GENERATOR_SRC="$(mktemp -t autovolume-dmg-background).swift"
+BACKGROUND_GENERATOR_BIN="$(mktemp -t autovolume-dmg-background-bin)"
+trap_generator_cleanup() { rm -f "$BACKGROUND_GENERATOR_SRC" "$BACKGROUND_GENERATOR_BIN"; }
+cat > "$BACKGROUND_GENERATOR_SRC" <<'SWIFT'
 import AppKit
 
 let output = CommandLine.arguments[1]
@@ -106,6 +109,9 @@ guard let data = image.tiffRepresentation,
 }
 try png.write(to: URL(fileURLWithPath: output))
 SWIFT
+swiftc -o "$BACKGROUND_GENERATOR_BIN" "$BACKGROUND_GENERATOR_SRC"
+"$BACKGROUND_GENERATOR_BIN" "$BACKGROUND" "$ARROW_SOURCE"
+trap_generator_cleanup
 
 hdiutil create -volname AutoVolume -srcfolder "$STAGING" -ov -format UDRW -fs HFS+ "$RW_DMG" >/dev/null
 attach_output="$(hdiutil attach "$RW_DMG" -readwrite)"
