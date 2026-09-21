@@ -10,7 +10,7 @@ On this machine, the default `swiftc` (installed via `swiftly`, Swift 6.3.3) fai
 SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch
 ```
 
-(`MACOSX_DEPLOYMENT_TARGET=14.0` matches `Package.swift`'s `platforms: [.macOS(.v14)]`.) Every command below that invokes `script/build_and_run.sh` implicitly needs this prefix.
+(`MACOSX_DEPLOYMENT_TARGET=14.0` matches `Package.swift`'s `platforms: [.macOS(.v14)]`.) Every command below that invokes `script/build_and_run.sh` **or `script/package_dmg.sh`** implicitly needs this prefix — `package_dmg.sh` also shells out to `swift` (to render the DMG background image) and hits the same SDK 27.0 bug otherwise.
 
 ## Release workflow after code changes
 
