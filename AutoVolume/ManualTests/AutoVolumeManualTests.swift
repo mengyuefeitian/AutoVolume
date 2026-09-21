@@ -565,6 +565,53 @@ func testNTFSMountPlannerMountUsesBundledNtfs3g() throws {
     try expect(plan.arguments == ["/dev/disk4s1", "/Volumes/USB", "-olocal", "-oallow_other", "-oauto_xattr"], "Mount plan arguments did not match the researched invocation")
 }
 
+func testNTFSDriverInstallerDetectsFUSETInstalledMarker() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let markerPath = directory.appendingPathComponent("uninstall.sh").path
+    try "".write(toFile: markerPath, atomically: true, encoding: .utf8)
+
+    let installer = NTFSDriverInstaller(fuseTMarkerPath: markerPath)
+
+    try expect(installer.isFUSETInstalled() == true, "Installer should report FUSE-T installed when the marker file exists")
+}
+
+func testNTFSDriverInstallerDetectsFUSETMissingMarker() throws {
+    let installer = NTFSDriverInstaller(fuseTMarkerPath: "/tmp/\(UUID().uuidString)/does-not-exist.sh")
+
+    try expect(installer.isFUSETInstalled() == false, "Installer should report FUSE-T not installed when the marker file is missing")
+}
+
+func testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence() throws {
+    let installer = NTFSDriverInstaller()
+
+    let matchesRealFilesystemState = installer.isHelperInstalled() == FileManager.default.fileExists(atPath: NTFSHelperSocket.daemonPlistInstallPath)
+
+    try expect(matchesRealFilesystemState, "isHelperInstalled() should reflect whether the daemon plist exists on disk")
+}
+
+func testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan() throws {
+    let installer = NTFSDriverInstaller()
+
+    let plan = installer.installPlan(
+        bundledInstallerPkgPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/fuse-t-installer.pkg",
+        bundledHelperExecutablePath: "/Applications/AutoVolume.app/Contents/Resources/NTFSPrivilegedHelper",
+        bundledDaemonPlistPath: "/Applications/AutoVolume.app/Contents/Resources/com.autovolume.ntfshelper.plist",
+        bundledNTFS3GPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g",
+        bundledNTFS3GDylibPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib"
+    )
+
+    try expect(plan.executable == "/usr/bin/osascript", "Install plan should run through osascript for a single admin-privileged prompt")
+    try expect(plan.arguments.count == 2 && plan.arguments[0] == "-e", "Install plan should be a single osascript -e invocation")
+    let script = plan.arguments[1]
+    try expect(script.contains("with administrator privileges"), "Install plan must request administrator privileges")
+    try expect(script.contains("installer -pkg"), "Install plan must install the bundled FUSE-T pkg")
+    try expect(script.contains(NTFSHelperSocket.helperInstallPath), "Install plan must copy the helper to its install path")
+    try expect(script.contains(NTFSHelperSocket.daemonPlistInstallPath), "Install plan must copy the LaunchDaemon plist to its install path")
+    try expect(script.contains("launchctl bootstrap system"), "Install plan must bootstrap the LaunchDaemon")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -636,7 +683,11 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSHelperRequestValidator rejects mount without devicePath", testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath),
     ("NTFSDriverPaths constants", testNTFSDriverPathsAreUnderPrivilegedHelperTools),
     ("NTFSMountPlanner unmount uses diskutil", testNTFSMountPlannerUnmountUsesDiskutil),
-    ("NTFSMountPlanner mount uses bundled ntfs-3g", testNTFSMountPlannerMountUsesBundledNtfs3g)
+    ("NTFSMountPlanner mount uses bundled ntfs-3g", testNTFSMountPlannerMountUsesBundledNtfs3g),
+    ("NTFSDriverInstaller detects FUSE-T installed marker", testNTFSDriverInstallerDetectsFUSETInstalledMarker),
+    ("NTFSDriverInstaller detects FUSE-T missing marker", testNTFSDriverInstallerDetectsFUSETMissingMarker),
+    ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),
+    ("NTFSDriverInstaller builds single admin-privileged install plan", testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan)
 ]
 
 do {
