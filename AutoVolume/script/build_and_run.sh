@@ -12,6 +12,7 @@ pkill -f "$APP/Contents/MacOS/AutoVolume" 2>/dev/null || true
 mkdir -p "$BUILD/shared" "$BUILD/tests" "$ROOT/dist"
 
 swiftc \
+  -target arm64-apple-macosx14.0 \
   -enable-testing \
   -emit-module \
   -emit-library \
@@ -44,6 +45,7 @@ swiftc \
   Sources/AutoVolumeShared/NTFSAutoMountService.swift
 
 swiftc \
+  -target arm64-apple-macosx14.0 \
   -I "$BUILD/shared" \
   -L "$BUILD/shared" \
   -lAutoVolumeShared \
@@ -55,6 +57,7 @@ swiftc \
 "$BUILD/tests/AutoVolumeManualTests"
 
 swiftc \
+  -target arm64-apple-macosx14.0 \
   -I "$BUILD/shared" \
   -L "$BUILD/shared" \
   -lAutoVolumeShared \
@@ -65,6 +68,7 @@ swiftc \
   Sources/AutoVolumeAgent/main.swift
 
 swiftc \
+  -target arm64-apple-macosx14.0 \
   -I "$BUILD/shared" \
   -L "$BUILD/shared" \
   -lAutoVolumeShared \
@@ -77,6 +81,7 @@ swiftc \
   Sources/AutoVolumeNTFSHelper/main.swift
 
 swiftc \
+  -target arm64-apple-macosx14.0 \
   -I "$BUILD/shared" \
   -L "$BUILD/shared" \
   -lAutoVolumeShared \
