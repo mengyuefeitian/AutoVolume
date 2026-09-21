@@ -21,4 +21,10 @@ public final class NTFSRemountDebouncer {
         defer { lock.unlock() }
         lastProcessed[bsdName] = date
     }
+
+    public func clear(bsdName: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        lastProcessed.removeValue(forKey: bsdName)
+    }
 }

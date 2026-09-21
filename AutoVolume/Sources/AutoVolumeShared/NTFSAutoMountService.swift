@@ -35,6 +35,13 @@ public final class NTFSAutoMountService {
     private let alertStore: AlertStore
     private let debouncer: NTFSRemountDebouncer
     private let bundledInstallerPaths: NTFSBundledInstallerPaths
+    /// Once true, `installPlan` is never re-run for the remainder of this instance's
+    /// lifetime (this is an in-memory, instance-scoped flag; it does not persist across
+    /// Agent restarts — an accepted scoping tradeoff).
+    private var hasAttemptedInstallThisSession = false
+    /// Deterministic per-bsdName alert IDs for mount-failure alerts, so a failure on one
+    /// device doesn't clobber the onboarding alert or another device's failure alert.
+    private var mountFailureAlertIDs: [String: UUID] = [:]
 
     public init(
         settingsStore: AppSettingsStore = JSONAppSettingsStore(),
@@ -79,7 +86,11 @@ public final class NTFSAutoMountService {
             return
         }
 
-        if !driverInstaller.isFullyInstalled() {
+        let wasFullyInstalled = driverInstaller.isFullyInstalled()
+        if !wasFullyInstalled {
+            guard !hasAttemptedInstallThisSession else { return }
+            hasAttemptedInstallThisSession = true
+
             let plan = driverInstaller.installPlan(
                 bundledInstallerPkgPath: bundledInstallerPaths.fuseTInstallerPkgPath,
                 bundledHelperExecutablePath: bundledInstallerPaths.helperExecutablePath,
@@ -89,17 +100,58 @@ public final class NTFSAutoMountService {
                 bundledSharedDylibPath: bundledInstallerPaths.sharedDylibPath,
                 bundledNewsyslogConfPath: bundledInstallerPaths.newsyslogConfPath
             )
-            _ = try? commandRunner.run(plan)
+            let installResult = try? commandRunner.run(plan)
+            guard let installResult, installResult.exitCode == 0 else {
+                try? alertStore.record(
+                    volumeID: Self.onboardingAlertID,
+                    volumeName: volumeName,
+                    message: "NTFS 驱动安装失败或被取消，「\(volumeName)」已保留为只读。可在设置中关闭再开启「NTFS 读写支持」以重试。"
+                )
+                return
+            }
         }
 
-        let response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
-        guard response.success else { return }
+        var response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
+        if !wasFullyInstalled, response.message.contains("could not connect") {
+            // launchctl bootstrap returns once the job is loaded, not once the daemon has
+            // created and is listening on its socket, so the very next connect attempt can
+            // race the daemon's startup. Retry a few times with a short delay (bounded to
+            // 2.5s total) before giving up.
+            for _ in 0..<5 where response.message.contains("could not connect") {
+                Thread.sleep(forTimeInterval: 0.5)
+                response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
+                if response.success { break }
+            }
+        }
+
+        guard response.success else {
+            try? alertStore.record(
+                volumeID: mountFailureAlertID(for: bsdName),
+                volumeName: volumeName,
+                message: "NTFS 硬盘「\(volumeName)」读写挂载失败：\(response.message)。已保留为只读。"
+            )
+            _ = try? commandRunner.run(CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["mount", bsdName]))
+            return
+        }
 
         try? mountedVolumesStore.add(NTFSVolume(bsdName: bsdName, volumeName: volumeName, devicePath: devicePath, mountPoint: mountPoint, mountedAt: Date()))
         try? alertStore.resolve(volumeID: Self.onboardingAlertID)
     }
 
     public func handleDiskDisappeared(bsdName: String) {
+        if let volume = (try? mountedVolumesStore.load())?.first(where: { $0.bsdName == bsdName }) {
+            _ = helperClient.send(NTFSHelperRequest(action: .unmount, mountPoint: volume.mountPoint))
+        }
         try? mountedVolumesStore.remove(bsdName: bsdName)
+        debouncer.clear(bsdName: bsdName)
+    }
+
+    private func mountFailureAlertID(for bsdName: String) -> UUID {
+        if let existing = mountFailureAlertIDs[bsdName] {
+            return existing
+        }
+        let newID = UUID()
+        mountFailureAlertIDs[bsdName] = newID
+        return newID
     }
 }

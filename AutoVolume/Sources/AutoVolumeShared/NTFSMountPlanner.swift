@@ -14,7 +14,7 @@ public struct NTFSMountPlanner {
     public func mountReadWritePlan(devicePath: String, mountPoint: String) -> CommandPlan {
         CommandPlan(
             executable: ntfs3gPath,
-            arguments: [devicePath, mountPoint, "-olocal", "-oallow_other", "-oauto_xattr"]
+            arguments: [devicePath, mountPoint, "-olocal", "-oallow_other", "-oauto_xattr", "-onosuid", "-onoexec"]
         )
     }
 }

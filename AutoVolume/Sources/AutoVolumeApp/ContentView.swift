@@ -49,11 +49,35 @@ struct ContentView: View {
                 .keyboardShortcut("n")
             }
 
-            if viewModel.volumes.isEmpty {
+            if viewModel.volumes.isEmpty && viewModel.ntfsVolumes.isEmpty {
                 ContentUnavailableView(viewModel.strings.emptyTitle, systemImage: "externaldrive.badge.plus", description: Text(viewModel.strings.emptyDescription))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(viewModel.volumes) { volume in
+                List {
+                if !viewModel.ntfsVolumes.isEmpty {
+                    Section {
+                        ForEach(viewModel.ntfsVolumes) { ntfsVolume in
+                            HStack(spacing: 12) {
+                                Image(systemName: "externaldrive.fill.badge.checkmark")
+                                    .foregroundStyle(.green)
+                                VStack(alignment: .leading) {
+                                    Text(ntfsVolume.volumeName).font(.headline)
+                                    Text(ntfsVolume.mountPoint)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(viewModel.strings.ntfsReadWriteBadge)
+                                    .font(.caption)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.green.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                }
+                ForEach(viewModel.volumes) { volume in
                     HStack(spacing: 12) {
                         Image(systemName: statusIcon(for: volume))
                             .foregroundStyle(statusColor(for: volume))
@@ -117,6 +141,7 @@ struct ContentView: View {
                         .help(viewModel.strings.remove)
                     }
                     .padding(.vertical, 6)
+                }
                 }
                 .scrollContentBackground(.hidden)
             }

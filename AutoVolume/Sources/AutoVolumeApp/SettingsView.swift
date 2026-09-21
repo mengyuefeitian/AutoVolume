@@ -37,7 +37,7 @@ struct SettingsView: View {
 
             Section(localized("NTFS 硬盘", "NTFS Drives")) {
                 Toggle(localized("自动以读写方式挂载 NTFS 外接硬盘", "Automatically mount external NTFS drives read-write"), isOn: $autoMountNTFSReadWrite)
-                Text(localized("开启后，插入的 NTFS 格式硬盘会自动切换为可读写（首次开启需要输入一次管理员密码安装内置驱动，之后不再需要）。关闭时保持 macOS 原生只读挂载。", "When on, inserted NTFS drives are automatically switched to read-write (the first time requires an admin password to install the bundled driver, never again after that). When off, macOS's native read-only mount is left untouched."))
+                Text(localized("开启后，下次插入 NTFS 硬盘时会安装内置驱动（需要输入一次管理员密码），之后不再需要。关闭时保持 macOS 原生只读挂载。", "When on, the next NTFS drive you insert will trigger a one-time admin password prompt to install the bundled driver; never again after that. When off, macOS's native read-only mount is left untouched."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

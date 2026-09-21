@@ -74,6 +74,28 @@ public struct NTFSDriverInstaller {
         )
     }
 
+    /// Removes the AutoVolume-specific NTFS artifacts installed by `installPlan`: the
+    /// LaunchDaemon (bootout + plist), the privileged helper binary, the driver install
+    /// directory (ntfs-3g, its dylib, and the shared dylib copy), and the newsyslog.d conf.
+    /// FUSE-T itself is a separate, user-installed product via its own pkg and is
+    /// intentionally left alone. Each step tolerates a partial install via `|| true`.
+    public func uninstallPlan() -> CommandPlan {
+        let shellCommand = """
+        launchctl bootout system '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))' 2>/dev/null || true
+        rm -f '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
+        rm -f '\(shellEscaped(NTFSHelperSocket.helperInstallPath))'
+        rm -rf '\(shellEscaped(NTFSDriverPaths.installDirectory))'
+        rm -f /etc/newsyslog.d/com.autovolume.ntfshelper.conf
+        """
+        let escapedShellCommand = shellCommand
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return CommandPlan(
+            executable: "/usr/bin/osascript",
+            arguments: ["-e", "do shell script \"\(escapedShellCommand)\" with administrator privileges"]
+        )
+    }
+
     private func shellEscaped(_ value: String) -> String {
         value.replacingOccurrences(of: "'", with: "'\\''")
     }

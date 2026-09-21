@@ -562,7 +562,7 @@ func testNTFSMountPlannerMountUsesBundledNtfs3g() throws {
     let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB")
 
     try expect(plan.executable == NTFSDriverPaths.ntfs3gExecutablePath, "Mount plan should invoke the installed ntfs-3g binary")
-    try expect(plan.arguments == ["/dev/disk4s1", "/Volumes/USB", "-olocal", "-oallow_other", "-oauto_xattr"], "Mount plan arguments did not match the researched invocation")
+    try expect(plan.arguments == ["/dev/disk4s1", "/Volumes/USB", "-olocal", "-oallow_other", "-oauto_xattr", "-onosuid", "-onoexec"], "Mount plan arguments did not match the researched invocation")
 }
 
 func testNTFSDriverInstallerDetectsFUSETInstalledMarker() throws {
@@ -703,6 +703,18 @@ func testNTFSRemountDebouncerTracksDevicesIndependently() throws {
     try expect(debouncer.shouldProcess(bsdName: "disk5s1", now: start.addingTimeInterval(1)) == true, "A different device should not be suppressed by another device's cooldown")
 }
 
+func testNTFSRemountDebouncerClearAllowsImmediateReprocessing() throws {
+    let debouncer = NTFSRemountDebouncer(cooldown: 30)
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+    debouncer.markProcessed(bsdName: "disk4s1", at: start)
+    try expect(debouncer.shouldProcess(bsdName: "disk4s1", now: start.addingTimeInterval(1)) == false, "Sanity check: should still be suppressed within the cooldown window before clearing")
+
+    debouncer.clear(bsdName: "disk4s1")
+
+    try expect(debouncer.shouldProcess(bsdName: "disk4s1", now: start.addingTimeInterval(1)) == true, "After clear, the same device should be processed immediately even within what would have been the cooldown window")
+}
+
 func testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled() throws {
     let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let alertsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -802,19 +814,112 @@ func testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails() throws {
     try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
     let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: false, message: "mount failed"))
     let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
+    let commandRunner = RecordingCommandRunner()
+    let alertStore = AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
     let service = NTFSAutoMountService(
         settingsStore: settingsStore,
         driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/Library/Application Support/fuse-t/uninstall.sh"),
         helperClient: helperClient,
         mountedVolumesStore: volumesStore,
-        commandRunner: RecordingCommandRunner(),
-        alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        commandRunner: commandRunner,
+        alertStore: alertStore
     )
 
     service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
 
     let volumes = try volumesStore.load()
     try expect(volumes.isEmpty, "A failed helper mount must not be recorded as an active NTFS volume")
+    try expect(
+        commandRunner.plans.last == CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["mount", "disk4s1"]),
+        "On mount failure, the drive should be remounted natively read-only via diskutil so it isn't left completely unmounted"
+    )
+    let alerts = try alertStore.load()
+    try expect(
+        alerts.contains { $0.message.contains("mount failed") },
+        "A failed helper mount should record an alert whose message mentions the failure reason"
+    )
+}
+
+func testNTFSAutoMountServiceRecordsAlertAndSkipsHelperWhenInstallFails() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let markerDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let alertsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+        try? FileManager.default.removeItem(at: volumesDirectory)
+        try? FileManager.default.removeItem(at: markerDirectory)
+        try? FileManager.default.removeItem(at: alertsDirectory)
+    }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
+    let markerPath = markerDirectory.appendingPathComponent("uninstall.sh").path
+    // marker does not exist: installer must run first, and we simulate a declined admin
+    // password prompt (osascript reports this via a non-zero exit code).
+    let commandRunner = RecordingCommandRunner(result: CommandResult(exitCode: 1, stdout: "", stderr: "User canceled"))
+    let helperClient = RecordingHelperClient()
+    let alertStore = AlertStore(directory: alertsDirectory)
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: markerPath),
+        helperClient: helperClient,
+        mountedVolumesStore: NTFSMountedVolumesStore(directory: volumesDirectory),
+        commandRunner: commandRunner,
+        alertStore: alertStore
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+
+    try expect(commandRunner.plans.count == 1, "Only the install command should have run")
+    try expect(helperClient.sentRequests.isEmpty, "The helper must not be contacted when the driver install itself failed or was declined")
+    let alerts = try alertStore.load()
+    try expect(alerts.contains { $0.volumeID == NTFSAutoMountService.onboardingAlertID }, "A failed/declined install should record an onboarding-style alert")
+
+    // A second disk (or the same disk reappearing) must not re-run the install command.
+    service.handleDiskEligibleForReadWrite(bsdName: "disk5s1", devicePath: "/dev/disk5s1", volumeName: "USB2", mountPoint: "/Volumes/USB2", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+
+    try expect(commandRunner.plans.count == 1, "The install command must not be re-run for the remainder of this NTFSAutoMountService instance's lifetime after a failed attempt")
+    try expect(helperClient.sentRequests.isEmpty, "Still no helper contact after the second disk, since the driver was never successfully installed")
+}
+
+func testNTFSAutoMountServiceUnmountCleansUpHelperAndDebouncerOnEject() throws {
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: volumesDirectory) }
+    let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
+    try volumesStore.add(NTFSVolume(bsdName: "disk4s1", volumeName: "USB", devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", mountedAt: Date()))
+    let helperClient = RecordingHelperClient()
+    let debouncer = NTFSRemountDebouncer(cooldown: 30)
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+    debouncer.markProcessed(bsdName: "disk4s1", at: start)
+    let service = NTFSAutoMountService(
+        settingsStore: JSONAppSettingsStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/tmp/\(UUID().uuidString)/missing"),
+        helperClient: helperClient,
+        mountedVolumesStore: volumesStore,
+        commandRunner: RecordingCommandRunner(),
+        alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
+        debouncer: debouncer
+    )
+
+    service.handleDiskDisappeared(bsdName: "disk4s1")
+
+    try expect(helperClient.sentRequests == [NTFSHelperRequest(action: .unmount, mountPoint: "/Volumes/USB")], "Ejecting a tracked NTFS volume should send a best-effort unmount request to the helper")
+    let volumes = try volumesStore.load()
+    try expect(volumes.isEmpty, "The ejected volume should be removed from the store")
+    try expect(debouncer.shouldProcess(bsdName: "disk4s1", now: start.addingTimeInterval(1)) == true, "Ejecting should clear the debouncer's cooldown so a replug within the window is processed")
+}
+
+func testNTFSDriverInstallerBuildsUninstallPlan() throws {
+    let installer = NTFSDriverInstaller()
+
+    let plan = installer.uninstallPlan()
+
+    try expect(plan.executable == "/usr/bin/osascript", "Uninstall plan should run through osascript")
+    let script = plan.arguments[1]
+    try expect(script.contains("with administrator privileges"), "Uninstall plan must request administrator privileges")
+    try expect(script.contains("launchctl bootout system"), "Uninstall plan must unload the LaunchDaemon")
+    try expect(script.contains(NTFSHelperSocket.helperInstallPath), "Uninstall plan must remove the installed helper binary")
+    try expect(script.contains(NTFSDriverPaths.installDirectory), "Uninstall plan must remove the driver install directory")
 }
 
 struct FakeMountStateProvider: MountStateProvider {
@@ -914,10 +1019,14 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSRemountDebouncer suppresses within cooldown", testNTFSRemountDebouncerSuppressesWithinCooldown),
     ("NTFSRemountDebouncer allows after cooldown", testNTFSRemountDebouncerAllowsAfterCooldownExpires),
     ("NTFSRemountDebouncer tracks devices independently", testNTFSRemountDebouncerTracksDevicesIndependently),
+    ("NTFSRemountDebouncer clear allows immediate reprocessing", testNTFSRemountDebouncerClearAllowsImmediateReprocessing),
     ("NTFSAutoMountService onboarding alert when disabled", testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled),
     ("NTFSAutoMountService skips already-owned mounts", testNTFSAutoMountServiceSkipsWhenAlreadyOwnedByOurDriver),
     ("NTFSAutoMountService installs driver then sends helper mount request", testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest),
-    ("NTFSAutoMountService does not record volume when helper mount fails", testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails)
+    ("NTFSAutoMountService does not record volume when helper mount fails", testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails),
+    ("NTFSAutoMountService records alert and skips helper when install fails", testNTFSAutoMountServiceRecordsAlertAndSkipsHelperWhenInstallFails),
+    ("NTFSAutoMountService cleans up helper and debouncer on eject", testNTFSAutoMountServiceUnmountCleansUpHelperAndDebouncerOnEject),
+    ("NTFSDriverInstaller builds uninstall plan", testNTFSDriverInstallerBuildsUninstallPlan)
 ]
 
 do {

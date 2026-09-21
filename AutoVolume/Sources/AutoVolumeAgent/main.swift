@@ -26,27 +26,48 @@ let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvin
 let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
 let ntfsAutoMountService = NTFSAutoMountService(bundledInstallerPaths: NTFSBundledInstallerPaths(bundle: Bundle(path: appResourcesPath) ?? Bundle.main))
 
+/// Pulls the fields we need out of a disk's DiskArbitration description and, if the disk
+/// looks like an eligible NTFS volume, hands it to the auto-mount service. Shared by both
+/// the disk-appeared and disk-description-changed callbacks below, since either one may be
+/// the first to observe `kDADiskDescriptionVolumePathKey` becoming available (see comment
+/// on `DARegisterDiskDescriptionChangedCallback` registration for why both are needed).
+func handleDiskDescriptionIfEligible(_ disk: DADisk) {
+    guard let description = DADiskCopyDescription(disk) as? [String: Any] else { return }
+    guard let namePtr = DADiskGetBSDName(disk) else { return }
+    let bsdName = String(cString: namePtr)
+    guard !bsdName.isEmpty else { return }
+    // `personality` (filesystem-type check) and `mountedFileSystemName` (already-ours check)
+    // are intentionally read from the same kDADiskDescriptionVolumeKindKey — DiskArbitration
+    // doesn't expose two separate keys for this. Not a bug; don't "fix" it into two lookups.
+    let personality = description[kDADiskDescriptionVolumeKindKey as String] as? String
+    let volumeName = description[kDADiskDescriptionVolumeNameKey as String] as? String ?? bsdName
+    guard let volumePath = description[kDADiskDescriptionVolumePathKey as String] as? URL else { return }
+    let mountedFileSystemName = description[kDADiskDescriptionVolumeKindKey as String] as? String
+    ntfsAutoMountService.handleDiskEligibleForReadWrite(
+        bsdName: bsdName,
+        devicePath: "/dev/\(bsdName)",
+        volumeName: volumeName,
+        mountPoint: volumePath.path,
+        filesystemPersonality: personality,
+        mountedFileSystemName: mountedFileSystemName
+    )
+}
+
 func startNTFSDiskWatcher() {
     guard let session = DASessionCreate(kCFAllocatorDefault) else { return }
     DASessionScheduleWithRunLoop(session, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
 
     let appearedCallback: DADiskAppearedCallback = { disk, _ in
-        guard let description = DADiskCopyDescription(disk) as? [String: Any] else { return }
-        guard let namePtr = DADiskGetBSDName(disk) else { return }
-        let bsdName = String(cString: namePtr)
-        guard !bsdName.isEmpty else { return }
-        let personality = description[kDADiskDescriptionVolumeKindKey as String] as? String
-        let volumeName = description[kDADiskDescriptionVolumeNameKey as String] as? String ?? bsdName
-        guard let volumePath = description[kDADiskDescriptionVolumePathKey as String] as? URL else { return }
-        let mountedFileSystemName = description[kDADiskDescriptionVolumeKindKey as String] as? String
-        ntfsAutoMountService.handleDiskEligibleForReadWrite(
-            bsdName: bsdName,
-            devicePath: "/dev/\(bsdName)",
-            volumeName: volumeName,
-            mountPoint: volumePath.path,
-            filesystemPersonality: personality,
-            mountedFileSystemName: mountedFileSystemName
-        )
+        handleDiskDescriptionIfEligible(disk)
+    }
+    // DADiskAppearedCallback typically fires BEFORE diskarbitrationd finishes mounting the
+    // volume, at which point kDADiskDescriptionVolumePathKey is still absent and the guard
+    // above bails out. The description-changed callback fires again once the volume path
+    // (and other description fields) become available, so we re-run the same eligibility
+    // check there. NTFSRemountDebouncer (see handleDiskEligibleForReadWrite) makes duplicate
+    // delivery across the two callbacks safe.
+    let descriptionChangedCallback: DADiskDescriptionChangedCallback = { disk, _, _ in
+        handleDiskDescriptionIfEligible(disk)
     }
     let disappearedCallback: DADiskDisappearedCallback = { disk, _ in
         guard let namePtr = DADiskGetBSDName(disk) else { return }
@@ -55,6 +76,8 @@ func startNTFSDiskWatcher() {
         ntfsAutoMountService.handleDiskDisappeared(bsdName: bsdName)
     }
     DARegisterDiskAppearedCallback(session, nil, appearedCallback, nil)
+    let watchedKeys = [kDADiskDescriptionVolumePathKey] as CFArray
+    DARegisterDiskDescriptionChangedCallback(session, nil, watchedKeys, descriptionChangedCallback, nil)
     DARegisterDiskDisappearedCallback(session, nil, disappearedCallback, nil)
 }
 

@@ -58,6 +58,7 @@ struct AppStrings {
     let alerts: String
     let clearAlerts: String
     let noAlerts: String
+    let ntfsReadWriteBadge: String
 
     static func values(for language: AppLanguage) -> AppStrings {
         switch language {
@@ -103,7 +104,8 @@ struct AppStrings {
                 unmountSucceeded: "Unmounted.",
                 alerts: "Alerts",
                 clearAlerts: "Clear",
-                noAlerts: "No alerts"
+                noAlerts: "No alerts",
+                ntfsReadWriteBadge: "NTFS (Read-Write)"
             )
         case .chinese:
             AppStrings(
@@ -147,7 +149,8 @@ struct AppStrings {
                 unmountSucceeded: "已卸载。",
                 alerts: "告警",
                 clearAlerts: "清空",
-                noAlerts: "暂无告警"
+                noAlerts: "暂无告警",
+                ntfsReadWriteBadge: "NTFS（读写）"
             )
         }
     }
@@ -158,6 +161,7 @@ public final class AppViewModel {
     public private(set) var volumes: [VolumeConfig] = []
     public private(set) var alerts: [VolumeAlert] = []
     public private(set) var volumeStatuses: [VolumeConfig.ID: VolumeStatus] = [:]
+    public private(set) var ntfsVolumes: [NTFSVolume] = []
     public var selectedVolumeID: VolumeConfig.ID?
     public var editorVolume: VolumeConfig?
     public var editorSessionID = UUID()
@@ -178,6 +182,7 @@ public final class AppViewModel {
     private let mountStateProvider: MountStateProvider
     private let mountExposure: MountExposure
     private let settingsStore: AppSettingsStore
+    private let ntfsMountedVolumesStore = NTFSMountedVolumesStore()
 
     private static let languageDefaultsKey = "AutoVolume.language"
 
@@ -216,6 +221,7 @@ public final class AppViewModel {
         }
         migrateLegacyMountPoints()
         refreshVolumeStatuses()
+        refreshNTFSVolumes()
     }
 
     var strings: AppStrings { AppStrings.values(for: language) }
@@ -286,6 +292,11 @@ public final class AppViewModel {
 
     public func refreshAlertsOnly() {
         alerts = (try? alertStore.load()) ?? []
+        refreshNTFSVolumes()
+    }
+
+    public func refreshNTFSVolumes() {
+        ntfsVolumes = (try? ntfsMountedVolumesStore.load()) ?? []
     }
 
     public func clearAlerts() {
