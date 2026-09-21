@@ -617,6 +617,22 @@ func testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan() throws {
     )
 }
 
+func testNTFSHelperClientReturnsFailureWhenSocketMissing() throws {
+    let client = NTFSHelperClient(socketPath: "/tmp/\(UUID().uuidString)/does-not-exist.sock")
+
+    let response = client.send(NTFSHelperRequest(action: .unmount, mountPoint: "/Volumes/USB"))
+
+    try expect(response.success == false, "Sending to a non-existent socket should return a failure response, not crash or throw")
+}
+
+func testNTFSHelperClientConformsToProtocol() throws {
+    let client: NTFSHelperClientProtocol = NTFSHelperClient(socketPath: "/tmp/\(UUID().uuidString)/does-not-exist.sock")
+
+    let response = client.send(NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB"))
+
+    try expect(response.success == false, "NTFSHelperClient should be usable through NTFSHelperClientProtocol")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -692,7 +708,9 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSDriverInstaller detects FUSE-T installed marker", testNTFSDriverInstallerDetectsFUSETInstalledMarker),
     ("NTFSDriverInstaller detects FUSE-T missing marker", testNTFSDriverInstallerDetectsFUSETMissingMarker),
     ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),
-    ("NTFSDriverInstaller builds single admin-privileged install plan", testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan)
+    ("NTFSDriverInstaller builds single admin-privileged install plan", testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan),
+    ("NTFSHelperClient returns failure when socket missing", testNTFSHelperClientReturnsFailureWhenSocketMissing),
+    ("NTFSHelperClient conforms to NTFSHelperClientProtocol", testNTFSHelperClientConformsToProtocol)
 ]
 
 do {

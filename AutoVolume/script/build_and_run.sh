@@ -38,7 +38,8 @@ swiftc \
   Sources/AutoVolumeShared/NTFSMountedVolumesStore.swift \
   Sources/AutoVolumeShared/NTFSHelperProtocol.swift \
   Sources/AutoVolumeShared/NTFSMountPlanner.swift \
-  Sources/AutoVolumeShared/NTFSDriverInstaller.swift
+  Sources/AutoVolumeShared/NTFSDriverInstaller.swift \
+  Sources/AutoVolumeShared/NTFSHelperClient.swift
 
 swiftc \
   -I "$BUILD/shared" \
