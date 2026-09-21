@@ -1,5 +1,17 @@
 # AutoVolume Project Rules
 
+## Build environment note (Swift toolchain / SDK)
+
+On this machine, the default `swiftc` (installed via `swiftly`, Swift 6.3.3) fails to compile any multi-file target that imports Foundation when paired with the default `MacOSX.sdk` (`MacOSX27.0.sdk`) — it hits a reproducible `error: unknown argument: '-target-arch-variant'` inside the ClangImporter's Foundation module build. This reproduces identically on Swift 6.2.4 and 6.3.3, and is specific to SDK 27.0 (confirmed via minimal repro: 2+ Swift files each importing Foundation, `-emit-module`, any SDK-27.0-based invocation). The older `MacOSX26.5.sdk` (also shipped under `/Library/Developer/CommandLineTools/SDKs/`) does not have this bug.
+
+**Always build/test with these env vars set** until this is fixed upstream or a newer Xcode/CLT resolves it:
+
+```bash
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch
+```
+
+(`MACOSX_DEPLOYMENT_TARGET=14.0` matches `Package.swift`'s `platforms: [.macOS(.v14)]`.) Every command below that invokes `script/build_and_run.sh` implicitly needs this prefix.
+
 ## Release workflow after code changes
 
 After finishing any code change in this project (including small/intermediate iterations, not just final "done" states), automatically:
