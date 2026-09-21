@@ -599,7 +599,8 @@ func testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan() throws {
         bundledHelperExecutablePath: "/Applications/AutoVolume.app/Contents/Resources/NTFSPrivilegedHelper",
         bundledDaemonPlistPath: "/Applications/AutoVolume.app/Contents/Resources/com.autovolume.ntfshelper.plist",
         bundledNTFS3GPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g",
-        bundledNTFS3GDylibPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib"
+        bundledNTFS3GDylibPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib",
+        bundledSharedDylibPath: "/Applications/AutoVolume.app/Contents/Frameworks/libAutoVolumeShared.dylib"
     )
 
     try expect(plan.executable == "/usr/bin/osascript", "Install plan should run through osascript for a single admin-privileged prompt")
@@ -609,11 +610,55 @@ func testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan() throws {
     try expect(script.contains("installer -pkg"), "Install plan must install the bundled FUSE-T pkg")
     try expect(script.contains(NTFSHelperSocket.helperInstallPath), "Install plan must copy the helper to its install path")
     try expect(script.contains(NTFSHelperSocket.daemonPlistInstallPath), "Install plan must copy the LaunchDaemon plist to its install path")
+    try expect(script.contains(NTFSDriverPaths.sharedLibraryPath), "Install plan must copy AutoVolumeShared's dylib next to the driver so the standalone helper can load it")
     try expect(script.contains("launchctl bootstrap system"), "Install plan must bootstrap the LaunchDaemon")
     try expect(script.contains("launchctl bootout system"), "Install plan must unload any existing LaunchDaemon registration before bootstrapping, to be idempotent")
     try expect(
         script.range(of: "launchctl bootout")!.lowerBound < script.range(of: "launchctl bootstrap")!.lowerBound,
         "Install plan must bootout the LaunchDaemon before bootstrapping it"
+    )
+}
+
+func testNTFSDriverInstallerIncludesNewsyslogConfWhenProvided() throws {
+    let installer = NTFSDriverInstaller()
+
+    let plan = installer.installPlan(
+        bundledInstallerPkgPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/fuse-t-installer.pkg",
+        bundledHelperExecutablePath: "/Applications/AutoVolume.app/Contents/Resources/NTFSPrivilegedHelper",
+        bundledDaemonPlistPath: "/Applications/AutoVolume.app/Contents/Resources/com.autovolume.ntfshelper.plist",
+        bundledNTFS3GPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g",
+        bundledNTFS3GDylibPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib",
+        bundledSharedDylibPath: "/Applications/AutoVolume.app/Contents/Frameworks/libAutoVolumeShared.dylib",
+        bundledNewsyslogConfPath: "/Applications/AutoVolume.app/Contents/Resources/com.autovolume.ntfshelper.newsyslog.conf"
+    )
+
+    let script = plan.arguments[1]
+    try expect(
+        script.contains(NTFSHelperSocket.newsyslogConfInstallPath),
+        "Install plan must copy the bundled newsyslog.d config to its install path when provided"
+    )
+    try expect(
+        script.contains("com.autovolume.ntfshelper.newsyslog.conf"),
+        "Install plan must reference the bundled newsyslog.d source file"
+    )
+}
+
+func testNTFSDriverInstallerOmitsNewsyslogConfWhenNotProvided() throws {
+    let installer = NTFSDriverInstaller()
+
+    let plan = installer.installPlan(
+        bundledInstallerPkgPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/fuse-t-installer.pkg",
+        bundledHelperExecutablePath: "/Applications/AutoVolume.app/Contents/Resources/NTFSPrivilegedHelper",
+        bundledDaemonPlistPath: "/Applications/AutoVolume.app/Contents/Resources/com.autovolume.ntfshelper.plist",
+        bundledNTFS3GPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g",
+        bundledNTFS3GDylibPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib",
+        bundledSharedDylibPath: "/Applications/AutoVolume.app/Contents/Frameworks/libAutoVolumeShared.dylib"
+    )
+
+    let script = plan.arguments[1]
+    try expect(
+        !script.contains(NTFSHelperSocket.newsyslogConfInstallPath),
+        "Install plan must not reference the newsyslog.d install path when no bundled conf path is given, preserving backward compatibility"
     )
 }
 
@@ -862,6 +907,8 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSDriverInstaller detects FUSE-T missing marker", testNTFSDriverInstallerDetectsFUSETMissingMarker),
     ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),
     ("NTFSDriverInstaller builds single admin-privileged install plan", testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan),
+    ("NTFSDriverInstaller includes newsyslog.d conf when provided", testNTFSDriverInstallerIncludesNewsyslogConfWhenProvided),
+    ("NTFSDriverInstaller omits newsyslog.d conf when not provided", testNTFSDriverInstallerOmitsNewsyslogConfWhenNotProvided),
     ("NTFSHelperClient returns failure when socket missing", testNTFSHelperClientReturnsFailureWhenSocketMissing),
     ("NTFSHelperClient conforms to NTFSHelperClientProtocol", testNTFSHelperClientConformsToProtocol),
     ("NTFSRemountDebouncer suppresses within cooldown", testNTFSRemountDebouncerSuppressesWithinCooldown),

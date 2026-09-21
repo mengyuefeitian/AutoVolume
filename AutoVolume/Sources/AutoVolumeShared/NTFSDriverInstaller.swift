@@ -26,22 +26,42 @@ public struct NTFSDriverInstaller {
         bundledHelperExecutablePath: String,
         bundledDaemonPlistPath: String,
         bundledNTFS3GPath: String,
-        bundledNTFS3GDylibPath: String
+        bundledNTFS3GDylibPath: String,
+        bundledSharedDylibPath: String,
+        bundledNewsyslogConfPath: String? = nil
     ) -> CommandPlan {
         let driverDir = NTFSDriverPaths.installDirectory
+        let newsyslogStep: String
+        if let bundledNewsyslogConfPath {
+            newsyslogStep = """
+
+            mkdir -p '\(shellEscaped("/etc/newsyslog.d"))'
+            cp '\(shellEscaped(bundledNewsyslogConfPath))' '\(shellEscaped(NTFSHelperSocket.newsyslogConfInstallPath))'
+            chown root:wheel '\(shellEscaped(NTFSHelperSocket.newsyslogConfInstallPath))'
+            chmod 644 '\(shellEscaped(NTFSHelperSocket.newsyslogConfInstallPath))'
+            """
+        } else {
+            newsyslogStep = ""
+        }
         let shellCommand = """
         set -e
         installer -pkg '\(shellEscaped(bundledInstallerPkgPath))' -target /
         mkdir -p '\(shellEscaped(driverDir))'
         cp '\(shellEscaped(bundledNTFS3GPath))' '\(shellEscaped(NTFSDriverPaths.ntfs3gExecutablePath))'
         cp '\(shellEscaped(bundledNTFS3GDylibPath))' '\(shellEscaped(NTFSDriverPaths.ntfs3gDylibPath))'
+        chown root:wheel '\(shellEscaped(NTFSDriverPaths.ntfs3gExecutablePath))'
         chmod 755 '\(shellEscaped(NTFSDriverPaths.ntfs3gExecutablePath))'
+        chown root:wheel '\(shellEscaped(NTFSDriverPaths.ntfs3gDylibPath))'
+        chmod 644 '\(shellEscaped(NTFSDriverPaths.ntfs3gDylibPath))'
+        cp '\(shellEscaped(bundledSharedDylibPath))' '\(shellEscaped(NTFSDriverPaths.sharedLibraryPath))'
+        chown root:wheel '\(shellEscaped(NTFSDriverPaths.sharedLibraryPath))'
+        chmod 644 '\(shellEscaped(NTFSDriverPaths.sharedLibraryPath))'
         cp '\(shellEscaped(bundledHelperExecutablePath))' '\(shellEscaped(NTFSHelperSocket.helperInstallPath))'
         chown root:wheel '\(shellEscaped(NTFSHelperSocket.helperInstallPath))'
         chmod 544 '\(shellEscaped(NTFSHelperSocket.helperInstallPath))'
         cp '\(shellEscaped(bundledDaemonPlistPath))' '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
         chown root:wheel '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
-        chmod 644 '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
+        chmod 644 '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'\(newsyslogStep)
         launchctl bootout system '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))' 2>/dev/null || true
         launchctl bootstrap system '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
         """

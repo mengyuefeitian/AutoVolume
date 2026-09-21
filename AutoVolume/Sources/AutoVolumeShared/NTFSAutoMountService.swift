@@ -6,6 +6,8 @@ public struct NTFSBundledInstallerPaths {
     public var daemonPlistPath: String
     public var ntfs3gPath: String
     public var ntfs3gDylibPath: String
+    public var newsyslogConfPath: String
+    public var sharedDylibPath: String
 
     public init(bundle: Bundle = .main) {
         let resourcesPath = bundle.resourcePath ?? "/Applications/AutoVolume.app/Contents/Resources"
@@ -14,6 +16,11 @@ public struct NTFSBundledInstallerPaths {
         self.daemonPlistPath = resourcesPath + "/com.autovolume.ntfshelper.plist"
         self.ntfs3gPath = resourcesPath + "/NTFSDriver/ntfs-3g"
         self.ntfs3gDylibPath = resourcesPath + "/NTFSDriver/libntfs-3g.89.dylib"
+        self.newsyslogConfPath = resourcesPath + "/com.autovolume.ntfshelper.newsyslog.conf"
+        // The app bundle already places this at Contents/Frameworks (for the app/agent);
+        // the installer copies this same file into the privileged driver directory so
+        // NTFSPrivilegedHelper (running standalone as a LaunchDaemon) can load it too.
+        self.sharedDylibPath = resourcesPath + "/../Frameworks/libAutoVolumeShared.dylib"
     }
 }
 
@@ -78,7 +85,9 @@ public final class NTFSAutoMountService {
                 bundledHelperExecutablePath: bundledInstallerPaths.helperExecutablePath,
                 bundledDaemonPlistPath: bundledInstallerPaths.daemonPlistPath,
                 bundledNTFS3GPath: bundledInstallerPaths.ntfs3gPath,
-                bundledNTFS3GDylibPath: bundledInstallerPaths.ntfs3gDylibPath
+                bundledNTFS3GDylibPath: bundledInstallerPaths.ntfs3gDylibPath,
+                bundledSharedDylibPath: bundledInstallerPaths.sharedDylibPath,
+                bundledNewsyslogConfPath: bundledInstallerPaths.newsyslogConfPath
             )
             _ = try? commandRunner.run(plan)
         }

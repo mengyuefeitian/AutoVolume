@@ -58,10 +58,23 @@ swiftc \
   -I "$BUILD/shared" \
   -L "$BUILD/shared" \
   -lAutoVolumeShared \
+  -framework DiskArbitration \
   -Xlinker -rpath \
   -Xlinker @executable_path/../Frameworks \
   -o "$BUILD/AutoVolumeAgent" \
   Sources/AutoVolumeAgent/main.swift
+
+swiftc \
+  -I "$BUILD/shared" \
+  -L "$BUILD/shared" \
+  -lAutoVolumeShared \
+  -framework SystemConfiguration \
+  -Xlinker -rpath \
+  -Xlinker @executable_path/../Frameworks \
+  -Xlinker -rpath \
+  -Xlinker /Library/PrivilegedHelperTools/com.autovolume.ntfsdriver \
+  -o "$BUILD/NTFSPrivilegedHelper" \
+  Sources/AutoVolumeNTFSHelper/main.swift
 
 swiftc \
   -I "$BUILD/shared" \
@@ -87,8 +100,21 @@ cp "$ROOT/Resources/com.autovolume.agent.plist" "$APP/Contents/Resources/com.aut
 cp "$ROOT/Resources/AutoVolume.icns" "$APP/Contents/Resources/AutoVolume.icns"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
+mkdir -p "$APP/Contents/Resources/NTFSDriver"
+cp "$ROOT/Resources/NTFSDriver/ntfs-3g" "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
+cp "$ROOT/Resources/NTFSDriver/libntfs-3g.89.dylib" "$APP/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib"
+cp "$ROOT/Resources/NTFSDriver/fuse-t-installer.pkg" "$APP/Contents/Resources/NTFSDriver/fuse-t-installer.pkg"
+cp "$ROOT/Resources/NTFSDriver/LICENSE-ntfs-3g.txt" "$APP/Contents/Resources/NTFSDriver/LICENSE-ntfs-3g.txt"
+cp "$ROOT/Resources/NTFSDriver/LICENSE-fuse-t.txt" "$APP/Contents/Resources/NTFSDriver/LICENSE-fuse-t.txt"
+chmod +x "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
+cp "$BUILD/NTFSPrivilegedHelper" "$APP/Contents/Resources/NTFSPrivilegedHelper"
+cp "$ROOT/Resources/com.autovolume.ntfshelper.plist" "$APP/Contents/Resources/com.autovolume.ntfshelper.plist"
+cp "$ROOT/Resources/com.autovolume.ntfshelper.newsyslog.conf" "$APP/Contents/Resources/com.autovolume.ntfshelper.newsyslog.conf"
+
 codesign --force --sign - "$APP/Contents/Frameworks/libAutoVolumeShared.dylib"
 codesign --force --sign - "$APP/Contents/Resources/AutoVolumeAgent"
+codesign --force --sign - "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
+codesign --force --sign - "$APP/Contents/Resources/NTFSPrivilegedHelper"
 codesign --force --sign - "$APP"
 
 if [[ "${1:-}" == "--verify" ]]; then

@@ -4,6 +4,10 @@ public enum NTFSDriverPaths {
     public static let installDirectory = "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver"
     public static var ntfs3gExecutablePath: String { installDirectory + "/ntfs-3g" }
     public static var ntfs3gDylibPath: String { installDirectory + "/libntfs-3g.89.dylib" }
+    /// `NTFSPrivilegedHelper` links against `AutoVolumeShared`; since it runs standalone
+    /// as a LaunchDaemon (not from inside the app bundle), a copy of the shared dylib is
+    /// installed alongside the driver so its rpath can resolve it at load time.
+    public static var sharedLibraryPath: String { installDirectory + "/libAutoVolumeShared.dylib" }
 }
 
 public enum NTFSHelperSocket {
@@ -11,6 +15,9 @@ public enum NTFSHelperSocket {
     public static let daemonLabel = "com.autovolume.ntfshelper"
     public static let daemonPlistInstallPath = "/Library/LaunchDaemons/com.autovolume.ntfshelper.plist"
     public static let helperInstallPath = "/Library/PrivilegedHelperTools/com.autovolume.ntfshelper"
+    /// newsyslog.d rotates the helper's StandardOutPath/StandardErrorPath log so it
+    /// doesn't grow unbounded (flagged in Task 7's security review).
+    public static let newsyslogConfInstallPath = "/etc/newsyslog.d/com.autovolume.ntfshelper.conf"
 }
 
 public enum NTFSHelperAction: String, Codable, Equatable {
