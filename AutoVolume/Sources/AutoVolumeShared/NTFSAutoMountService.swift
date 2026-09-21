@@ -60,6 +60,7 @@ public final class NTFSAutoMountService {
         guard NTFSDiskClassifier.isNTFSFileSystem(personality: filesystemPersonality) else { return }
         guard !NTFSDiskClassifier.isOwnedByOurDriver(mountedFileSystemName: mountedFileSystemName) else { return }
         guard debouncer.shouldProcess(bsdName: bsdName) else { return }
+        debouncer.markProcessed(bsdName: bsdName)
 
         let settings = (try? settingsStore.load()) ?? AppSettings()
         guard settings.autoMountNTFSReadWrite else {
@@ -85,7 +86,6 @@ public final class NTFSAutoMountService {
         let response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
         guard response.success else { return }
 
-        debouncer.markProcessed(bsdName: bsdName)
         try? mountedVolumesStore.add(NTFSVolume(bsdName: bsdName, volumeName: volumeName, devicePath: devicePath, mountPoint: mountPoint, mountedAt: Date()))
         try? alertStore.resolve(volumeID: Self.onboardingAlertID)
     }
