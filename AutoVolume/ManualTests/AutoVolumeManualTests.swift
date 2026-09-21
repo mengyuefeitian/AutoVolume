@@ -387,6 +387,32 @@ func testAppSettingsStoreDefaultsAndRoundTrip() throws {
     try expect(loaded == settings, "AppSettingsStore should round-trip saved settings")
 }
 
+func testAppSettingsDecodesLegacyJSONWithoutNTFSField() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let legacyJSON = """
+    {"logLevel":0,"openFinderAfterMount":true}
+    """
+    try legacyJSON.write(to: directory.appendingPathComponent("settings.json"), atomically: true, encoding: .utf8)
+    let store = JSONAppSettingsStore(directory: directory)
+
+    let settings = try store.load()
+
+    try expect(settings.autoMountNTFSReadWrite == false, "Legacy settings.json without the field should default autoMountNTFSReadWrite to false")
+}
+
+func testAppSettingsRoundTripsNTFSSetting() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = JSONAppSettingsStore(directory: directory)
+
+    try store.save(AppSettings(autoMountNTFSReadWrite: true))
+    let loaded = try store.load()
+
+    try expect(loaded.autoMountNTFSReadWrite == true, "autoMountNTFSReadWrite did not round trip through JSON")
+}
+
 func testAutoVolumeLoggerFiltersByLogLevel() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -473,6 +499,8 @@ let tests: [(String, () throws -> Void)] = [
     ("AlertStore", testAlertStore),
     ("AutoVolumeLogger local time zone", testAutoVolumeLoggerWritesLocalTimeZone),
     ("AppSettingsStore", testAppSettingsStoreDefaultsAndRoundTrip),
+    ("AppSettings legacy JSON decode", testAppSettingsDecodesLegacyJSONWithoutNTFSField),
+    ("AppSettings NTFS setting round trip", testAppSettingsRoundTripsNTFSSetting),
     ("AutoVolumeLogger level filtering", testAutoVolumeLoggerFiltersByLogLevel),
     ("MountPlanner shouldOpenFinderAfterMount", testMountPlannerShouldOpenFinderAfterMountRespectsSetting)
 ]

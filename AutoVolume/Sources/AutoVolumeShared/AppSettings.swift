@@ -13,10 +13,25 @@ public enum LogLevel: Int, Codable, CaseIterable, Comparable {
 public struct AppSettings: Codable, Equatable {
     public var logLevel: LogLevel
     public var openFinderAfterMount: Bool
+    public var autoMountNTFSReadWrite: Bool
 
-    public init(logLevel: LogLevel = .info, openFinderAfterMount: Bool = true) {
+    enum CodingKeys: String, CodingKey {
+        case logLevel
+        case openFinderAfterMount
+        case autoMountNTFSReadWrite
+    }
+
+    public init(logLevel: LogLevel = .info, openFinderAfterMount: Bool = true, autoMountNTFSReadWrite: Bool = false) {
         self.logLevel = logLevel
         self.openFinderAfterMount = openFinderAfterMount
+        self.autoMountNTFSReadWrite = autoMountNTFSReadWrite
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.logLevel = try container.decode(LogLevel.self, forKey: .logLevel)
+        self.openFinderAfterMount = try container.decode(Bool.self, forKey: .openFinderAfterMount)
+        self.autoMountNTFSReadWrite = try container.decodeIfPresent(Bool.self, forKey: .autoMountNTFSReadWrite) ?? false
     }
 }
 
