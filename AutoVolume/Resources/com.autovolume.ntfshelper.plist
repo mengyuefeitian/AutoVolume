@@ -13,8 +13,8 @@
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Library/Logs/AutoVolume/ntfshelper.log</string>
+    <string>/var/log/com.autovolume.ntfshelper.log</string>
     <key>StandardErrorPath</key>
-    <string>/Library/Logs/AutoVolume/ntfshelper.log</string>
+    <string>/var/log/com.autovolume.ntfshelper.log</string>
 </dict>
 </plist>

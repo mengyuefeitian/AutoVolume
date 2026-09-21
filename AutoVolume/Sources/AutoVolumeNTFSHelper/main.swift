@@ -141,7 +141,14 @@ func handle(clientSocket: Int32) {
     // may issue mount/unmount requests. `uid != 0` alone (the prior check) let any
     // local non-root process on the machine — not just the AutoVolume app — drive
     // this root-owned daemon, since the socket is world-accessible (chmod 0666).
-    guard let consoleUID = consoleUserUID(), uid == consoleUID else {
+    //
+    // At the login window (no one signed in yet), `SCDynamicStoreCopyConsoleUser`
+    // does not return nil — it returns "loginwindow" with uid 0. Explicitly exclude
+    // that (`consoleUID != 0`) so this case is treated the same as "console user
+    // can't be determined" rather than degenerating into "peer must be uid 0",
+    // which would silently readmit the very root-peer case the original check
+    // existed to reject.
+    guard let consoleUID = consoleUserUID(), consoleUID != 0, uid == consoleUID else {
         log("rejected connection from uid \(uid): does not match console user")
         respond(NTFSHelperResponse(success: false, message: "unauthorized"), on: clientSocket)
         return
