@@ -39,7 +39,8 @@ swiftc \
   Sources/AutoVolumeShared/NTFSHelperProtocol.swift \
   Sources/AutoVolumeShared/NTFSMountPlanner.swift \
   Sources/AutoVolumeShared/NTFSDriverInstaller.swift \
-  Sources/AutoVolumeShared/NTFSHelperClient.swift
+  Sources/AutoVolumeShared/NTFSHelperClient.swift \
+  Sources/AutoVolumeShared/NTFSRemountDebouncer.swift
 
 swiftc \
   -I "$BUILD/shared" \

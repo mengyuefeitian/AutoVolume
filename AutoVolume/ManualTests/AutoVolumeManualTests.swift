@@ -633,6 +633,31 @@ func testNTFSHelperClientConformsToProtocol() throws {
     try expect(response.success == false, "NTFSHelperClient should be usable through NTFSHelperClientProtocol")
 }
 
+func testNTFSRemountDebouncerSuppressesWithinCooldown() throws {
+    let debouncer = NTFSRemountDebouncer(cooldown: 30)
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+    try expect(debouncer.shouldProcess(bsdName: "disk4s1", now: start) == true, "First occurrence should be processed")
+    debouncer.markProcessed(bsdName: "disk4s1", at: start)
+    try expect(debouncer.shouldProcess(bsdName: "disk4s1", now: start.addingTimeInterval(5)) == false, "Re-appearance within the cooldown window should be suppressed")
+}
+
+func testNTFSRemountDebouncerAllowsAfterCooldownExpires() throws {
+    let debouncer = NTFSRemountDebouncer(cooldown: 30)
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+    debouncer.markProcessed(bsdName: "disk4s1", at: start)
+    try expect(debouncer.shouldProcess(bsdName: "disk4s1", now: start.addingTimeInterval(31)) == true, "Re-appearance after the cooldown window should be processed (e.g. user re-inserted the drive)")
+}
+
+func testNTFSRemountDebouncerTracksDevicesIndependently() throws {
+    let debouncer = NTFSRemountDebouncer(cooldown: 30)
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+    debouncer.markProcessed(bsdName: "disk4s1", at: start)
+    try expect(debouncer.shouldProcess(bsdName: "disk5s1", now: start.addingTimeInterval(1)) == true, "A different device should not be suppressed by another device's cooldown")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -710,7 +735,10 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),
     ("NTFSDriverInstaller builds single admin-privileged install plan", testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan),
     ("NTFSHelperClient returns failure when socket missing", testNTFSHelperClientReturnsFailureWhenSocketMissing),
-    ("NTFSHelperClient conforms to NTFSHelperClientProtocol", testNTFSHelperClientConformsToProtocol)
+    ("NTFSHelperClient conforms to NTFSHelperClientProtocol", testNTFSHelperClientConformsToProtocol),
+    ("NTFSRemountDebouncer suppresses within cooldown", testNTFSRemountDebouncerSuppressesWithinCooldown),
+    ("NTFSRemountDebouncer allows after cooldown", testNTFSRemountDebouncerAllowsAfterCooldownExpires),
+    ("NTFSRemountDebouncer tracks devices independently", testNTFSRemountDebouncerTracksDevicesIndependently)
 ]
 
 do {
