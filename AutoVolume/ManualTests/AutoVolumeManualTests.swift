@@ -658,6 +658,120 @@ func testNTFSRemountDebouncerTracksDevicesIndependently() throws {
     try expect(debouncer.shouldProcess(bsdName: "disk5s1", now: start.addingTimeInterval(1)) == true, "A different device should not be suppressed by another device's cooldown")
 }
 
+func testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let alertsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+        try? FileManager.default.removeItem(at: alertsDirectory)
+        try? FileManager.default.removeItem(at: volumesDirectory)
+    }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: false))
+    let commandRunner = RecordingCommandRunner()
+    let helperClient = RecordingHelperClient()
+    let alertStore = AlertStore(directory: alertsDirectory)
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/tmp/\(UUID().uuidString)/missing"),
+        helperClient: helperClient,
+        mountedVolumesStore: NTFSMountedVolumesStore(directory: volumesDirectory),
+        commandRunner: commandRunner,
+        alertStore: alertStore
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+
+    try expect(commandRunner.plans.isEmpty, "No install commands should run while the setting is disabled")
+    try expect(helperClient.sentRequests.isEmpty, "No helper requests should be sent while the setting is disabled")
+    let alerts = try alertStore.load()
+    try expect(alerts.contains { $0.volumeID == NTFSAutoMountService.onboardingAlertID }, "A one-time onboarding alert should be recorded when an NTFS drive is seen with the setting disabled")
+}
+
+func testNTFSAutoMountServiceSkipsWhenAlreadyOwnedByOurDriver() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: settingsDirectory) }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
+    let commandRunner = RecordingCommandRunner()
+    let helperClient = RecordingHelperClient()
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/tmp/\(UUID().uuidString)/missing"),
+        helperClient: helperClient,
+        mountedVolumesStore: NTFSMountedVolumesStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
+        commandRunner: commandRunner,
+        alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "fusefs_ntfs")
+
+    try expect(commandRunner.plans.isEmpty, "Disks already mounted by our own driver should not be reprocessed")
+    try expect(helperClient.sentRequests.isEmpty, "Disks already mounted by our own driver should not trigger a helper request")
+}
+
+func testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let markerDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+        try? FileManager.default.removeItem(at: volumesDirectory)
+        try? FileManager.default.removeItem(at: markerDirectory)
+    }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
+    let markerPath = markerDirectory.appendingPathComponent("uninstall.sh").path
+    // marker does not exist yet: installer must run first
+    let commandRunner = RecordingCommandRunner()
+    let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: true))
+    let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: markerPath),
+        helperClient: helperClient,
+        mountedVolumesStore: volumesStore,
+        commandRunner: commandRunner,
+        alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+
+    try expect(commandRunner.plans.count == 1, "Expected exactly the driver install command; got \(commandRunner.plans.count)")
+    try expect(commandRunner.plans[0].executable == "/usr/bin/osascript", "The one command run by the Agent should be the driver install")
+    try expect(helperClient.sentRequests.count == 1, "Expected exactly one mount request sent to the helper")
+    try expect(helperClient.sentRequests[0] == NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB"), "Helper request did not match expected mount request")
+    let volumes = try volumesStore.load()
+    try expect(volumes.contains { $0.bsdName == "disk4s1" }, "The remounted volume should be recorded in NTFSMountedVolumesStore")
+}
+
+func testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+        try? FileManager.default.removeItem(at: volumesDirectory)
+    }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
+    let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: false, message: "mount failed"))
+    let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/Library/Application Support/fuse-t/uninstall.sh"),
+        helperClient: helperClient,
+        mountedVolumesStore: volumesStore,
+        commandRunner: RecordingCommandRunner(),
+        alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+
+    let volumes = try volumesStore.load()
+    try expect(volumes.isEmpty, "A failed helper mount must not be recorded as an active NTFS volume")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -674,6 +788,20 @@ final class RecordingCommandRunner: CommandRunner {
     func run(_ plan: CommandPlan) throws -> CommandResult {
         plans.append(plan)
         return result
+    }
+}
+
+final class RecordingHelperClient: NTFSHelperClientProtocol {
+    var sentRequests: [NTFSHelperRequest] = []
+    private let responseToReturn: NTFSHelperResponse
+
+    init(responseToReturn: NTFSHelperResponse = NTFSHelperResponse(success: true)) {
+        self.responseToReturn = responseToReturn
+    }
+
+    func send(_ request: NTFSHelperRequest) -> NTFSHelperResponse {
+        sentRequests.append(request)
+        return responseToReturn
     }
 }
 
@@ -738,7 +866,11 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSHelperClient conforms to NTFSHelperClientProtocol", testNTFSHelperClientConformsToProtocol),
     ("NTFSRemountDebouncer suppresses within cooldown", testNTFSRemountDebouncerSuppressesWithinCooldown),
     ("NTFSRemountDebouncer allows after cooldown", testNTFSRemountDebouncerAllowsAfterCooldownExpires),
-    ("NTFSRemountDebouncer tracks devices independently", testNTFSRemountDebouncerTracksDevicesIndependently)
+    ("NTFSRemountDebouncer tracks devices independently", testNTFSRemountDebouncerTracksDevicesIndependently),
+    ("NTFSAutoMountService onboarding alert when disabled", testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled),
+    ("NTFSAutoMountService skips already-owned mounts", testNTFSAutoMountServiceSkipsWhenAlreadyOwnedByOurDriver),
+    ("NTFSAutoMountService installs driver then sends helper mount request", testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest),
+    ("NTFSAutoMountService does not record volume when helper mount fails", testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails)
 ]
 
 do {

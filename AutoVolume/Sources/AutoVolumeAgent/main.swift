@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import DiskArbitration
 import AutoVolumeShared
 
 let sessionFilePath = parsedSessionFilePath(arguments: CommandLine.arguments)
@@ -20,6 +21,44 @@ let mountPlanner = MountPlanner()
 var scheduler = CheckScheduler()
 let alertStore = AlertStore()
 var networkFailedVolumeIDs = Set<UUID>()
+
+let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
+let ntfsAutoMountService = NTFSAutoMountService(bundledInstallerPaths: NTFSBundledInstallerPaths(bundle: Bundle(path: appResourcesPath) ?? Bundle.main))
+
+func startNTFSDiskWatcher() {
+    guard let session = DASessionCreate(kCFAllocatorDefault) else { return }
+    DASessionScheduleWithRunLoop(session, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+
+    let appearedCallback: DADiskAppearedCallback = { disk, _ in
+        guard let description = DADiskCopyDescription(disk) as? [String: Any] else { return }
+        guard let namePtr = DADiskGetBSDName(disk) else { return }
+        let bsdName = String(cString: namePtr)
+        guard !bsdName.isEmpty else { return }
+        let personality = description[kDADiskDescriptionVolumeKindKey as String] as? String
+        let volumeName = description[kDADiskDescriptionVolumeNameKey as String] as? String ?? bsdName
+        guard let volumePath = description[kDADiskDescriptionVolumePathKey as String] as? URL else { return }
+        let mountedFileSystemName = description[kDADiskDescriptionVolumeKindKey as String] as? String
+        ntfsAutoMountService.handleDiskEligibleForReadWrite(
+            bsdName: bsdName,
+            devicePath: "/dev/\(bsdName)",
+            volumeName: volumeName,
+            mountPoint: volumePath.path,
+            filesystemPersonality: personality,
+            mountedFileSystemName: mountedFileSystemName
+        )
+    }
+    let disappearedCallback: DADiskDisappearedCallback = { disk, _ in
+        guard let namePtr = DADiskGetBSDName(disk) else { return }
+        let bsdName = String(cString: namePtr)
+        guard !bsdName.isEmpty else { return }
+        ntfsAutoMountService.handleDiskDisappeared(bsdName: bsdName)
+    }
+    DARegisterDiskAppearedCallback(session, nil, appearedCallback, nil)
+    DARegisterDiskDisappearedCallback(session, nil, disappearedCallback, nil)
+}
+
+startNTFSDiskWatcher()
 
 func runOnce() {
     guard appSessionIsActive() else {
