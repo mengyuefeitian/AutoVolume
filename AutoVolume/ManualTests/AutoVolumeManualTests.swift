@@ -547,6 +547,24 @@ func testNTFSDriverPathsAreUnderPrivilegedHelperTools() throws {
     try expect(NTFSDriverPaths.ntfs3gExecutablePath == "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver/ntfs-3g", "ntfs3gExecutablePath changed unexpectedly")
 }
 
+func testNTFSMountPlannerUnmountUsesDiskutil() throws {
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+
+    let plan = planner.unmountReadOnlyPlan(mountPoint: "/Volumes/USB")
+
+    try expect(plan.executable == "/usr/sbin/diskutil", "Unmount plan should use diskutil")
+    try expect(plan.arguments == ["unmount", "/Volumes/USB"], "Unmount plan arguments did not match")
+}
+
+func testNTFSMountPlannerMountUsesBundledNtfs3g() throws {
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+
+    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB")
+
+    try expect(plan.executable == NTFSDriverPaths.ntfs3gExecutablePath, "Mount plan should invoke the installed ntfs-3g binary")
+    try expect(plan.arguments == ["/dev/disk4s1", "/Volumes/USB", "-olocal", "-oallow_other", "-oauto_xattr"], "Mount plan arguments did not match the researched invocation")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -616,7 +634,9 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSHelperRequestValidator rejects outside /Volumes", testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes),
     ("NTFSHelperRequestValidator accepts /Volumes path", testNTFSHelperRequestValidatorAcceptsMountPointUnderVolumes),
     ("NTFSHelperRequestValidator rejects mount without devicePath", testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath),
-    ("NTFSDriverPaths constants", testNTFSDriverPathsAreUnderPrivilegedHelperTools)
+    ("NTFSDriverPaths constants", testNTFSDriverPathsAreUnderPrivilegedHelperTools),
+    ("NTFSMountPlanner unmount uses diskutil", testNTFSMountPlannerUnmountUsesDiskutil),
+    ("NTFSMountPlanner mount uses bundled ntfs-3g", testNTFSMountPlannerMountUsesBundledNtfs3g)
 ]
 
 do {
