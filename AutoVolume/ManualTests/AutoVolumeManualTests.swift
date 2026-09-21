@@ -444,6 +444,28 @@ func testMountPlannerShouldOpenFinderAfterMountRespectsSetting() throws {
     try expect(!disabledPlanner.shouldOpenFinderAfterMount(for: config), "Disabled setting should not open Finder after mount")
 }
 
+func testNTFSDiskClassifierIdentifiesNTFSPersonality() throws {
+    try expect(NTFSDiskClassifier.isNTFSFileSystem(personality: "Windows_NTFS") == true, "Windows_NTFS should classify as NTFS")
+    try expect(NTFSDiskClassifier.isNTFSFileSystem(personality: "ntfs") == true, "lowercase ntfs should classify as NTFS")
+    try expect(NTFSDiskClassifier.isNTFSFileSystem(personality: "Windows_FAT_32") == false, "FAT32 should not classify as NTFS")
+    try expect(NTFSDiskClassifier.isNTFSFileSystem(personality: nil) == false, "nil personality should not classify as NTFS")
+}
+
+func testNTFSDiskClassifierIgnoresAlreadyMountedByOurDriver() throws {
+    try expect(NTFSDiskClassifier.isOwnedByOurDriver(mountedFileSystemName: "fusefs_ntfs") == true, "fusefs_ntfs mounts should be recognized as already ours")
+    try expect(NTFSDiskClassifier.isOwnedByOurDriver(mountedFileSystemName: "ntfs") == false, "native read-only ntfs mounts are not yet ours")
+    try expect(NTFSDiskClassifier.isOwnedByOurDriver(mountedFileSystemName: nil) == false, "nil mounted filesystem is not ours")
+}
+
+func testNTFSVolumeRoundTripsThroughJSON() throws {
+    let volume = NTFSVolume(bsdName: "disk4s1", volumeName: "MY USB", devicePath: "/dev/disk4s1", mountPoint: "/Volumes/MY USB", mountedAt: Date(timeIntervalSince1970: 1_700_000_000))
+
+    let data = try JSONEncoder().encode(volume)
+    let decoded = try JSONDecoder().decode(NTFSVolume.self, from: data)
+
+    try expect(decoded == volume, "NTFSVolume JSON round trip failed")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -502,7 +524,10 @@ let tests: [(String, () throws -> Void)] = [
     ("AppSettings legacy JSON decode", testAppSettingsDecodesLegacyJSONWithoutNTFSField),
     ("AppSettings NTFS setting round trip", testAppSettingsRoundTripsNTFSSetting),
     ("AutoVolumeLogger level filtering", testAutoVolumeLoggerFiltersByLogLevel),
-    ("MountPlanner shouldOpenFinderAfterMount", testMountPlannerShouldOpenFinderAfterMountRespectsSetting)
+    ("MountPlanner shouldOpenFinderAfterMount", testMountPlannerShouldOpenFinderAfterMountRespectsSetting),
+    ("NTFSDiskClassifier NTFS personality", testNTFSDiskClassifierIdentifiesNTFSPersonality),
+    ("NTFSDiskClassifier already-mounted filter", testNTFSDiskClassifierIgnoresAlreadyMountedByOurDriver),
+    ("NTFSVolume JSON round trip", testNTFSVolumeRoundTripsThroughJSON)
 ]
 
 do {
