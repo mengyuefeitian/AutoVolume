@@ -498,6 +498,55 @@ func testNTFSMountedVolumesStoreAddReplacesSameBSDName() throws {
     try expect(loaded == [second], "Re-adding the same bsdName should replace, not duplicate")
 }
 
+func testNTFSHelperRequestRoundTripsThroughJSON() throws {
+    let request = NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB")
+
+    let encoded = try NTFSHelperWireFormat.encode(request)
+    let decoded = try NTFSHelperWireFormat.decodeRequest(encoded)
+
+    try expect(decoded == request, "NTFSHelperRequest did not round trip through the wire format")
+    try expect(encoded.last == 0x0A, "Encoded request must end with a newline delimiter")
+}
+
+func testNTFSHelperResponseRoundTripsThroughJSON() throws {
+    let response = NTFSHelperResponse(success: false, message: "mount failed")
+
+    let encoded = try NTFSHelperWireFormat.encode(response)
+    let decoded = try NTFSHelperWireFormat.decodeResponse(encoded)
+
+    try expect(decoded == response, "NTFSHelperResponse did not round trip through the wire format")
+    try expect(encoded.last == 0x0A, "Encoded response must end with a newline delimiter")
+}
+
+func testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes() throws {
+    let request = NTFSHelperRequest(action: .unmount, mountPoint: "/etc/passwd")
+
+    let error = NTFSHelperRequestValidator.validate(request)
+
+    try expect(error != nil, "A mountPoint outside /Volumes must be rejected")
+}
+
+func testNTFSHelperRequestValidatorAcceptsMountPointUnderVolumes() throws {
+    let request = NTFSHelperRequest(action: .unmount, mountPoint: "/Volumes/USB")
+
+    let error = NTFSHelperRequestValidator.validate(request)
+
+    try expect(error == nil, "A mountPoint under /Volumes should be accepted, got: \(error ?? "")")
+}
+
+func testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath() throws {
+    let request = NTFSHelperRequest(action: .mount, devicePath: nil, mountPoint: "/Volumes/USB")
+
+    let error = NTFSHelperRequestValidator.validate(request)
+
+    try expect(error != nil, "A mount action without devicePath must be rejected")
+}
+
+func testNTFSDriverPathsAreUnderPrivilegedHelperTools() throws {
+    try expect(NTFSDriverPaths.installDirectory == "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver", "installDirectory changed unexpectedly")
+    try expect(NTFSDriverPaths.ntfs3gExecutablePath == "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver/ntfs-3g", "ntfs3gExecutablePath changed unexpectedly")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -561,7 +610,13 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSDiskClassifier already-mounted filter", testNTFSDiskClassifierIgnoresAlreadyMountedByOurDriver),
     ("NTFSVolume JSON round trip", testNTFSVolumeRoundTripsThroughJSON),
     ("NTFSMountedVolumesStore add/load/remove", testNTFSMountedVolumesStoreAddLoadRemove),
-    ("NTFSMountedVolumesStore replaces same bsdName", testNTFSMountedVolumesStoreAddReplacesSameBSDName)
+    ("NTFSMountedVolumesStore replaces same bsdName", testNTFSMountedVolumesStoreAddReplacesSameBSDName),
+    ("NTFSHelperRequest wire round trip", testNTFSHelperRequestRoundTripsThroughJSON),
+    ("NTFSHelperResponse wire round trip", testNTFSHelperResponseRoundTripsThroughJSON),
+    ("NTFSHelperRequestValidator rejects outside /Volumes", testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes),
+    ("NTFSHelperRequestValidator accepts /Volumes path", testNTFSHelperRequestValidatorAcceptsMountPointUnderVolumes),
+    ("NTFSHelperRequestValidator rejects mount without devicePath", testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath),
+    ("NTFSDriverPaths constants", testNTFSDriverPathsAreUnderPrivilegedHelperTools)
 ]
 
 do {

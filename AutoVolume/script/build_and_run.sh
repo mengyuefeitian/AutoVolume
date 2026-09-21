@@ -35,7 +35,8 @@ swiftc \
   Sources/AutoVolumeShared/SMBPreferencesWriter.swift \
   Sources/AutoVolumeShared/AlertStore.swift \
   Sources/AutoVolumeShared/NTFSVolume.swift \
-  Sources/AutoVolumeShared/NTFSMountedVolumesStore.swift
+  Sources/AutoVolumeShared/NTFSMountedVolumesStore.swift \
+  Sources/AutoVolumeShared/NTFSHelperProtocol.swift
 
 swiftc \
   -I "$BUILD/shared" \
