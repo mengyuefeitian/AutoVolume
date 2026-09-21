@@ -156,7 +156,10 @@ func handle(clientSocket: Int32) {
 
     var buffer = [UInt8](repeating: 0, count: 4096)
     let bytesRead = read(clientSocket, &buffer, buffer.count)
-    guard bytesRead > 0 else { return }
+    guard bytesRead > 0 else {
+        log("closed connection from uid \(uid): no data received (timeout or empty read)")
+        return
+    }
     let requestData = Data(buffer[0..<bytesRead])
 
     do {
@@ -204,6 +207,10 @@ func handle(clientSocket: Int32) {
 
 while true {
     let clientSocket = accept(serverSocket, nil, nil)
-    guard clientSocket >= 0 else { continue }
+    guard clientSocket >= 0 else {
+        log("accept failed (errno \(errno)), pausing briefly before retrying")
+        usleep(100_000)
+        continue
+    }
     handle(clientSocket: clientSocket)
 }
