@@ -12,5 +12,9 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/AutoVolume/ntfshelper.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/AutoVolume/ntfshelper.log</string>
 </dict>
 </plist>
