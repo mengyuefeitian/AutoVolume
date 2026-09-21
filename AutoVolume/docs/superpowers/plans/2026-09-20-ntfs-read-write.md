@@ -4,96 +4,42 @@
 
 **Goal:** AutoVolume 能够检测任意插入的 NTFS 外接硬盘，并在不禁用 SIP、不要求用户手动批准系统扩展的前提下，用内置的 FUSE-T + ntfs-3g 自动将其从只读切换为读写挂载。
 
-**Architecture:** 新增 `NTFSAutoMountService`（运行在现有 `AutoVolumeAgent` launchd 常驻进程中）通过 DiskArbitration 事件回调（而非轮询）监听磁盘插入/拔出；纯逻辑（文件系统过滤、去抖、命令构造、驱动安装幂等性判断）拆分为独立可单元测试的类型，只有 DiskArbitration 的回调注册留在编排层。App 侧新增一个设置开关（默认关闭）和一次性提醒，复用现有 `AlertStore` 机制展示。
+**Architecture:** 新增 `NTFSAutoMountService`（运行在现有 `AutoVolumeAgent` launchd 常驻进程中）通过 DiskArbitration 事件回调（而非轮询）监听磁盘插入/拔出；纯逻辑（文件系统过滤、去抖、命令构造、驱动安装幂等性判断）拆分为独立可单元测试的类型，只有 DiskArbitration 的回调注册留在编排层。App 侧新增一个设置开关（默认关闭）和一次性提醒，复用现有 `AlertStore` 机制展示。**2026-09-21 实施调研修订**：`ntfs-3g` 打开原始块设备始终需要 root 权限（macOS 系统级限制，与 FUSE 后端无关，实测验证），且 ntfs-3g 自身拒绝在链接外部 FUSE 库时以 setuid 方式运行。因此新增一个新的可执行目标 `NTFSPrivilegedHelper`（root 常驻 LaunchDaemon），只负责"挂载/卸载指定块设备到指定路径"；无权限的 `AutoVolumeAgent` 通过本地 Unix domain socket 向它发送请求，不再直接调用 `ntfs-3g`。详见 `docs/superpowers/plans/2026-09-20-ntfs-driver-findings.md` 与 spec 的「权限模型」章节。
 
-**Tech Stack:** Swift 5.10 / macOS 14+，DiskArbitration.framework，FUSE-T（BSD/MIT 授权，用户态、无内核扩展）+ ntfs-3g（GPLv2，作为独立子进程调用，不静态链接），项目现有的 `CommandRunner`/`CommandPlan` 抽象。
+**Tech Stack:** Swift 5.10 / macOS 14+，DiskArbitration.framework，FUSE-T（二进制分发许可：非商业用途免费，已与用户确认 AutoVolume 属于非商业用途）+ ntfs-3g（GPLv2，作为独立子进程调用，不静态链接，构建自 `macos-fuse-t/ntfs-3g` 分支），项目现有的 `CommandRunner`/`CommandPlan` 抽象，BSD Unix domain socket（`Darwin` 模块，本地 IPC）。
 
 **Spec:** `docs/superpowers/specs/2026-09-20-ntfs-read-write-design.md`
+
+**Build environment note：** 本机 `swiftc`（swiftly 管理的 Swift 6.3.3）搭配默认 `MacOSX27.0.sdk` 编译任何多文件 Foundation 导入目标都会失败（`-target-arch-variant` 未知参数错误，ClangImporter 构建 Foundation Clang 模块时触发，已确认与 SDK 27.0 强相关、与 Swift 工具链版本无关）。**所有 `script/build_and_run.sh` 调用都必须加上环境变量前缀**（已记录进 `CLAUDE.md`）：
+
+```bash
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch
+```
 
 ## Global Constraints
 
 - 不得禁用 SIP，不得要求用户在系统设置中手动批准 System Extension（这是选择 FUSE-T 而非 macFUSE 的硬性前提，见 spec）。
 - `ntfs-3g`（GPLv2）必须以独立子进程方式调用（通过 `CommandPlan`/`Process`），禁止静态链接进 `AutoVolumeShared`，随包附带其 License 文本。
+- FUSE-T 二进制分发许可证为非商业用途，AutoVolume 目前及可预见的将来均为个人/内部使用，不做二次分发销售——若未来分发性质改变需重新评估此项。
 - 新增设置项 `autoMountNTFSReadWrite` 默认必须为 `false`（opt-in），且旧版本 `settings.json`（不含该字段）必须能正常解码，不能因缺字段而崩溃或报错。
-- 本项目的权威测试套件是 `ManualTests/AutoVolumeManualTests.swift`（通过 `script/build_and_run.sh` 运行，见项目 `CLAUDE.md`），新逻辑必须在此文件中补充对应的 `test...()` 函数并注册进文件末尾的 `tests` 数组；纯逻辑代码禁止依赖 `Bundle.main` 或真实 DiskArbitration 会话，以便可在该套件中无物理硬盘的情况下运行。
-- 项目构建脚本 `script/build_and_run.sh` 用显式文件列表调用 `swiftc`（不是 `swift build`），新增的 `Sources/AutoVolumeShared/*.swift` 文件必须手动加入该脚本里的编译文件列表，否则不会被打进 App。
-- 每完成一次代码改动（包括中间迭代），必须按 `CLAUDE.md` 流程：升版本号 → `script/build_and_run.sh --no-launch` → `script/package_dmg.sh <version>` → 交给用户自测，不自行判定完成。
+- **权限边界**：`AutoVolumeAgent`（无权限用户级进程）任何时候都不得直接调用 `ntfs-3g` 挂载原始块设备（已实测证实需要 root，且 ntfs-3g 拒绝 setuid 方式运行外部 FUSE 库）。所有实际挂载/卸载操作必须通过 `NTFSPrivilegedHelper`（root LaunchDaemon）的本地 socket 请求完成。`NTFSPrivilegedHelper` 只接受 `mountPoint` 以 `/Volumes/` 开头的请求，拒绝来自 uid 0（root）的连接请求（安全边界最小化，详见 Task 7）。这部分代码涉及本机特权守护进程，实现后必须过一遍 `security-reviewer` 检查（项目全局 CLAUDE.md 对"安全敏感代码"的要求）。
+- 本项目的权威测试套件是 `ManualTests/AutoVolumeManualTests.swift`（通过 `script/build_and_run.sh` 运行，见项目 `CLAUDE.md`），新逻辑必须在此文件中补充对应的 `test...()` 函数并注册进文件末尾的 `tests` 数组；纯逻辑代码禁止依赖 `Bundle.main` 或真实 DiskArbitration/socket 会话，以便可在该套件中无物理硬盘、无特权守护进程的情况下运行。
+- 项目构建脚本 `script/build_and_run.sh` 用显式文件列表调用 `swiftc`（不是 `swift build`），新增的 `Sources/AutoVolumeShared/*.swift` 文件必须手动加入该脚本里的编译文件列表，否则不会被打进 App。**每个任务自己负责把自己新增的文件加入构建脚本**（不要等到最后一个任务才补——见下方 Task 5 起对此的修正说明），确保每个任务都能独立通过 `script/build_and_run.sh --no-launch` 验证。
+- 每完成一次代码改动（包括中间迭代），必须按 `CLAUDE.md` 流程：升版本号 → `SDKROOT=... script/build_and_run.sh --no-launch` → `script/package_dmg.sh <version>` → 交给用户自测，不自行判定完成。**注意**：版本号递增 + DMG 打包只需要在最后一个任务（Task 13）做一次，中间任务只需要跑通 `script/build_and_run.sh --no-launch` 验证编译和 manual tests 通过即可，不必每个任务都打 DMG（DMG 面向用户手动验收，中间任务产出还不是可验收的完整功能）。
 
 ---
 
-### Task 1: 调研并落地 FUSE-T + ntfs-3g 的本地安装与挂载方式（Spike，产出 vendored 二进制与调研文档）
+### Task 1: 调研并落地 FUSE-T + ntfs-3g 的本地安装与挂载方式 — ✅ 已完成
 
-**说明：** 这是唯一一个不遵循标准 TDD 步骤的任务——它是一次性的、需要物理/虚拟 NTFS 介质的手工调研（对应 spec 中的两个"开放问题"）。产出物是后续所有任务都会直接引用的**具体事实**（确切的挂载命令、驱动安装标记路径），因此必须先完成并写成文档，后续任务不得再引入新的猜测性命令。
+**状态：已完成**（由 controller 直接执行，非子 agent；产出物已提交）。调研发现原计划假设的权限模型不成立（见上方 Architecture 的 2026-09-21 修订说明），已更新 spec 与本计划的后续任务。
 
-推荐建议模型：opus 5.2（规划/调研判断），执行下方 shell 命令用 sonnet 5 即可。
+产出物：
+- `docs/superpowers/plans/2026-09-20-ntfs-driver-findings.md`：完整调研结论，包括已验证的挂载命令、FUSE-T 安装标记路径、权限模型问题、许可证审查。
+- `Resources/NTFSDriver/ntfs-3g`、`Resources/NTFSDriver/libntfs-3g.89.dylib`：已构建自 `macos-fuse-t/ntfs-3g` 分支（链接 FUSE-T），已用 `install_name_tool` 调整为相对自身目录的可重定位二进制，已实测验证可读写挂载测试 NTFS 卷。
+- `Resources/NTFSDriver/fuse-t-installer.pkg`：FUSE-T 1.2.7 官方安装包。
+- `Resources/NTFSDriver/LICENSE-ntfs-3g.txt`、`Resources/NTFSDriver/LICENSE-fuse-t.txt`：许可证文本。
 
-**Files:**
-- Create: `docs/superpowers/plans/2026-09-20-ntfs-driver-findings.md`
-- Create: `Resources/NTFSDriver/ntfs-3g`（vendored 二进制）
-- Create: `Resources/NTFSDriver/LICENSE-ntfs-3g.txt`
-- Create: `Resources/NTFSDriver/fuse-t-installer.pkg`（vendored 安装包）
-- Create: `Resources/NTFSDriver/LICENSE-fuse-t.txt`
-
-**Interfaces:**
-- Produces：`docs/superpowers/plans/2026-09-20-ntfs-driver-findings.md` 中记录的「确认挂载命令」「确认卸载命令」「确认安装完成标记路径」，供 Task 5、Task 6 直接引用。
-
-- [ ] **Step 1: 在本机（非沙箱环境）安装 FUSE-T 与 ntfs-3g，创建测试用 NTFS 磁盘镜像**
-
-```bash
-brew install --cask fuse-t
-brew install ntfs-3g
-hdiutil create -size 200m -fs "MS-DOS FAT32" -volname NTFSTest /tmp/ntfstest.dmg
-# 用 Windows 或 `mkntfs`（ntfs-3g 附带）把上面的镜像格式化成 NTFS 用于本地测试：
-/usr/local/sbin/mkntfs -f /tmp/ntfstest.dmg
-```
-
-- [ ] **Step 2: 手动挂载并确认可写，记录确切命令**
-
-```bash
-hdiutil attach -nomount /tmp/ntfstest.dmg   # 记录输出的 /dev/diskN
-mkdir -p /tmp/ntfsmount
-/usr/local/bin/ntfs-3g /dev/diskN /tmp/ntfsmount -olocal -oallow_other -oauto_xattr
-touch /tmp/ntfsmount/write-test.txt && echo "写入成功"
-umount /tmp/ntfsmount
-```
-
-- [ ] **Step 3: 确认 FUSE-T 安装后的幂等性检测标记**
-
-```bash
-ls -la "/Library/Application Support/fuse-t/uninstall.sh"
-```
-
-确认该文件在安装后存在、卸载后消失，作为 `NTFSDriverInstaller` 判断"是否已安装"的依据。
-
-- [ ] **Step 4: 把验证过的二进制与安装包拷贝进项目 Resources**
-
-```bash
-mkdir -p Resources/NTFSDriver
-cp /usr/local/bin/ntfs-3g Resources/NTFSDriver/ntfs-3g
-cp "$(brew --cellar ntfs-3g)"/*/COPYING Resources/NTFSDriver/LICENSE-ntfs-3g.txt
-cp ~/Downloads/fuse-t-*.pkg Resources/NTFSDriver/fuse-t-installer.pkg   # 从 https://www.fuse-t.org 下载的安装包
-cp /path/to/fuse-t/LICENSE Resources/NTFSDriver/LICENSE-fuse-t.txt
-```
-
-- [ ] **Step 5: 写调研文档**
-
-创建 `docs/superpowers/plans/2026-09-20-ntfs-driver-findings.md`，内容至少包含：
-
-```markdown
-# NTFS 驱动调研结论
-
-- 安装完成标记：`/Library/Application Support/fuse-t/uninstall.sh` 存在即视为 FUSE-T 已安装。
-- 挂载命令：`<bundled>/ntfs-3g <devicePath> <mountPoint> -olocal -oallow_other -oauto_xattr`
-- 卸载命令：复用现有 `diskutil unmount <mountPoint>`（与 SMB/WebDAV 一致，无需 ntfs-3g 专属卸载命令）。
-- 安装 FUSE-T 命令：`installer -pkg <bundled>/fuse-t-installer.pkg -target /`（需要管理员权限）。
-```
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add docs/superpowers/plans/2026-09-20-ntfs-driver-findings.md Resources/NTFSDriver
-git commit -m "docs: record FUSE-T/ntfs-3g driver findings and vendor binaries"
-```
+后续任务（Task 5 起）直接引用这些已验证的产物和结论，不再是猜测性设计。
 
 ---
 
@@ -106,7 +52,7 @@ git commit -m "docs: record FUSE-T/ntfs-3g driver findings and vendor binaries"
 - Test: `ManualTests/AutoVolumeManualTests.swift`
 
 **Interfaces:**
-- Produces：`AppSettings.autoMountNTFSReadWrite: Bool`（默认 `false`），供 Task 9（Settings UI）与 Task 8（Agent 编排）读取。
+- Produces：`AppSettings.autoMountNTFSReadWrite: Bool`（默认 `false`），供 Task 12（Settings UI）与 Task 11（Agent 编排）读取。
 
 - [ ] **Step 1: 写失败的测试——旧版 settings.json（无新字段）仍能解码，且新字段默认 false**
 
@@ -149,7 +95,7 @@ func testAppSettingsRoundTripsNTFSSetting() throws {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 编译失败（`AppSettings` 没有 `autoMountNTFSReadWrite` 参数/属性），或测试断言失败。
 
 - [ ] **Step 3: 修改 `AppSettings` 增加字段并自定义 Codable 以兼容旧数据**
@@ -185,7 +131,7 @@ public struct AppSettings: Codable, Equatable {
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: `PASS: AppSettings legacy JSON decode`、`PASS: AppSettings NTFS setting round trip`，且所有既有测试仍然 `PASS`。
 
 - [ ] **Step 5: Commit**
@@ -249,7 +195,7 @@ func testNTFSVolumeRoundTripsThroughJSON() throws {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 编译失败（`NTFSVolume`/`NTFSDiskClassifier` 不存在）
 
 - [ ] **Step 3: 实现**
@@ -291,7 +237,7 @@ public enum NTFSDiskClassifier {
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 全部 `PASS`
 
 - [ ] **Step 5: Commit**
@@ -322,7 +268,7 @@ git commit -m "feat: add NTFSVolume model and NTFS filesystem classifier"
       public func remove(bsdName: String) throws
   }
   ```
-  供 Task 8（Agent 编排）写入、Task 9（App UI）读取。
+  供 Task 11（Agent 编排）写入、Task 12（App UI）读取。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -369,7 +315,7 @@ func testNTFSMountedVolumesStoreAddReplacesSameBSDName() throws {
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 编译失败（类型不存在）
 
 - [ ] **Step 3: 实现（直接参照 `AlertStore.swift` 的结构）**
@@ -418,7 +364,7 @@ public final class NTFSMountedVolumesStore {
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 全部 `PASS`
 
 - [ ] **Step 5: Commit**
@@ -430,68 +376,121 @@ git commit -m "feat: add NTFSMountedVolumesStore for tracking active NTFS read-w
 
 ---
 
-### Task 5: `NTFSDriverInstaller`（幂等性检测 + 安装 CommandPlan）
+### Task 5: `NTFSHelperProtocol`（Agent ↔ 特权 Helper 的共享请求/响应类型 + 路径常量 + 校验逻辑）
 
 推荐模型：sonnet 5。
 
+**说明：** 这是权限模型修正后新增的基础类型任务，供 Task 6（helper 内部挂载命令构造，沿用原设计不变）、Task 7（helper 本体）、Task 8（安装器）、Task 9（Agent 侧 socket 客户端）共同使用。所有路径都是固定常量（不依赖 `Bundle.main`），因此在 helper（root LaunchDaemon，运行时脱离 App bundle）和 Agent（在 App bundle 内）两侧都能一致工作。
+
 **Files:**
-- Create: `Sources/AutoVolumeShared/NTFSDriverInstaller.swift`
+- Create: `Sources/AutoVolumeShared/NTFSHelperProtocol.swift`
 - Test: `ManualTests/AutoVolumeManualTests.swift`
 
 **Interfaces:**
-- Consumes：`CommandPlan`（已存在，`CommandRunner.swift`）
 - Produces：
   ```swift
-  public struct NTFSDriverInstaller {
-      public init(fileManager: FileManager = .default, installMarkerPath: String = "/Library/Application Support/fuse-t/uninstall.sh")
-      public func isInstalled() -> Bool
-      public func installPlan(bundledInstallerPkgPath: String) -> CommandPlan
+  public enum NTFSDriverPaths {
+      public static let installDirectory: String   // "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver"
+      public static var ntfs3gExecutablePath: String { get }
+      public static var ntfs3gDylibPath: String { get }
+  }
+  public enum NTFSHelperSocket {
+      public static let path: String   // "/var/run/com.autovolume.ntfshelper.sock"
+      public static let daemonLabel: String   // "com.autovolume.ntfshelper"
+      public static let daemonPlistInstallPath: String   // "/Library/LaunchDaemons/com.autovolume.ntfshelper.plist"
+      public static let helperInstallPath: String   // "/Library/PrivilegedHelperTools/com.autovolume.ntfshelper"
+  }
+  public enum NTFSHelperAction: String, Codable, Equatable { case mount, unmount }
+  public struct NTFSHelperRequest: Codable, Equatable {
+      public var action: NTFSHelperAction
+      public var devicePath: String?
+      public var mountPoint: String
+      public init(action: NTFSHelperAction, devicePath: String? = nil, mountPoint: String)
+  }
+  public struct NTFSHelperResponse: Codable, Equatable {
+      public var success: Bool
+      public var message: String
+      public init(success: Bool, message: String = "")
+  }
+  public enum NTFSHelperWireFormat {
+      public static func encode(_ request: NTFSHelperRequest) throws -> Data
+      public static func encode(_ response: NTFSHelperResponse) throws -> Data
+      public static func decodeRequest(_ data: Data) throws -> NTFSHelperRequest
+      public static func decodeResponse(_ data: Data) throws -> NTFSHelperResponse
+  }
+  public enum NTFSHelperRequestValidator {
+      public static func validate(_ request: NTFSHelperRequest) -> String?   // nil = valid, else 错误信息
   }
   ```
-  供 Task 8（Agent 编排）调用。`installMarkerPath` 与 `installPlan` 的 `installer -pkg ... -target /` 命令直接取自 Task 1 的调研文档 `docs/superpowers/plans/2026-09-20-ntfs-driver-findings.md`。
+  供 Task 6-9 使用。`NTFSHelperWireFormat` 用换行符分隔的 JSON（每条消息一行），`NTFSHelperRequestValidator` 校验 `mountPoint` 必须以 `/Volumes/` 开头（防止请求方指定任意系统路径）、`action == .mount` 时 `devicePath` 不能为空。
 
 - [ ] **Step 1: 写失败测试**
 
 ```swift
-func testNTFSDriverInstallerDetectsInstalledMarker() throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let markerPath = directory.appendingPathComponent("uninstall.sh").path
-    try "".write(toFile: markerPath, atomically: true, encoding: .utf8)
+func testNTFSHelperRequestRoundTripsThroughJSON() throws {
+    let request = NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB")
 
-    let installer = NTFSDriverInstaller(installMarkerPath: markerPath)
+    let encoded = try NTFSHelperWireFormat.encode(request)
+    let decoded = try NTFSHelperWireFormat.decodeRequest(encoded)
 
-    try expect(installer.isInstalled() == true, "Installer should report installed when the marker file exists")
+    try expect(decoded == request, "NTFSHelperRequest did not round trip through the wire format")
+    try expect(encoded.last == 0x0A, "Encoded request must end with a newline delimiter")
 }
 
-func testNTFSDriverInstallerDetectsMissingMarker() throws {
-    let installer = NTFSDriverInstaller(installMarkerPath: "/tmp/\(UUID().uuidString)/does-not-exist.sh")
+func testNTFSHelperResponseRoundTripsThroughJSON() throws {
+    let response = NTFSHelperResponse(success: false, message: "mount failed")
 
-    try expect(installer.isInstalled() == false, "Installer should report not installed when the marker file is missing")
+    let encoded = try NTFSHelperWireFormat.encode(response)
+    let decoded = try NTFSHelperWireFormat.decodeResponse(encoded)
+
+    try expect(decoded == response, "NTFSHelperResponse did not round trip through the wire format")
+    try expect(encoded.last == 0x0A, "Encoded response must end with a newline delimiter")
 }
 
-func testNTFSDriverInstallerBuildsAdminPrivilegedInstallPlan() throws {
-    let installer = NTFSDriverInstaller()
+func testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes() throws {
+    let request = NTFSHelperRequest(action: .unmount, mountPoint: "/etc/passwd")
 
-    let plan = installer.installPlan(bundledInstallerPkgPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/fuse-t-installer.pkg")
+    let error = NTFSHelperRequestValidator.validate(request)
 
-    try expect(plan.executable == "/usr/bin/osascript", "Install plan should run through osascript for admin privileges")
-    try expect(plan.arguments == ["-e", "do shell script \"installer -pkg '/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/fuse-t-installer.pkg' -target /\" with administrator privileges"], "Install plan arguments did not match expected admin-privileged installer command")
+    try expect(error != nil, "A mountPoint outside /Volumes must be rejected")
+}
+
+func testNTFSHelperRequestValidatorAcceptsMountPointUnderVolumes() throws {
+    let request = NTFSHelperRequest(action: .unmount, mountPoint: "/Volumes/USB")
+
+    let error = NTFSHelperRequestValidator.validate(request)
+
+    try expect(error == nil, "A mountPoint under /Volumes should be accepted, got: \(error ?? "")")
+}
+
+func testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath() throws {
+    let request = NTFSHelperRequest(action: .mount, devicePath: nil, mountPoint: "/Volumes/USB")
+
+    let error = NTFSHelperRequestValidator.validate(request)
+
+    try expect(error != nil, "A mount action without devicePath must be rejected")
+}
+
+func testNTFSDriverPathsAreUnderPrivilegedHelperTools() throws {
+    try expect(NTFSDriverPaths.installDirectory == "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver", "installDirectory changed unexpectedly")
+    try expect(NTFSDriverPaths.ntfs3gExecutablePath == "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver/ntfs-3g", "ntfs3gExecutablePath changed unexpectedly")
 }
 ```
 
 添加到 `tests` 数组：
 
 ```swift
-    ("NTFSDriverInstaller detects installed marker", testNTFSDriverInstallerDetectsInstalledMarker),
-    ("NTFSDriverInstaller detects missing marker", testNTFSDriverInstallerDetectsMissingMarker),
-    ("NTFSDriverInstaller builds admin-privileged install plan", testNTFSDriverInstallerBuildsAdminPrivilegedInstallPlan),
+    ("NTFSHelperRequest wire round trip", testNTFSHelperRequestRoundTripsThroughJSON),
+    ("NTFSHelperResponse wire round trip", testNTFSHelperResponseRoundTripsThroughJSON),
+    ("NTFSHelperRequestValidator rejects outside /Volumes", testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes),
+    ("NTFSHelperRequestValidator accepts /Volumes path", testNTFSHelperRequestValidatorAcceptsMountPointUnderVolumes),
+    ("NTFSHelperRequestValidator rejects mount without devicePath", testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath),
+    ("NTFSDriverPaths constants", testNTFSDriverPathsAreUnderPrivilegedHelperTools),
 ```
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 编译失败（类型不存在）
 
 - [ ] **Step 3: 实现**
@@ -499,48 +498,105 @@ Expected: 编译失败（类型不存在）
 ```swift
 import Foundation
 
-public struct NTFSDriverInstaller {
-    private let fileManager: FileManager
-    private let installMarkerPath: String
+public enum NTFSDriverPaths {
+    public static let installDirectory = "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver"
+    public static var ntfs3gExecutablePath: String { installDirectory + "/ntfs-3g" }
+    public static var ntfs3gDylibPath: String { installDirectory + "/libntfs-3g.89.dylib" }
+}
 
-    public init(fileManager: FileManager = .default, installMarkerPath: String = "/Library/Application Support/fuse-t/uninstall.sh") {
-        self.fileManager = fileManager
-        self.installMarkerPath = installMarkerPath
+public enum NTFSHelperSocket {
+    public static let path = "/var/run/com.autovolume.ntfshelper.sock"
+    public static let daemonLabel = "com.autovolume.ntfshelper"
+    public static let daemonPlistInstallPath = "/Library/LaunchDaemons/com.autovolume.ntfshelper.plist"
+    public static let helperInstallPath = "/Library/PrivilegedHelperTools/com.autovolume.ntfshelper"
+}
+
+public enum NTFSHelperAction: String, Codable, Equatable {
+    case mount
+    case unmount
+}
+
+public struct NTFSHelperRequest: Codable, Equatable {
+    public var action: NTFSHelperAction
+    public var devicePath: String?
+    public var mountPoint: String
+
+    public init(action: NTFSHelperAction, devicePath: String? = nil, mountPoint: String) {
+        self.action = action
+        self.devicePath = devicePath
+        self.mountPoint = mountPoint
+    }
+}
+
+public struct NTFSHelperResponse: Codable, Equatable {
+    public var success: Bool
+    public var message: String
+
+    public init(success: Bool, message: String = "") {
+        self.success = success
+        self.message = message
+    }
+}
+
+public enum NTFSHelperWireFormat {
+    public static func encode(_ request: NTFSHelperRequest) throws -> Data {
+        var data = try JSONEncoder().encode(request)
+        data.append(0x0A)
+        return data
     }
 
-    public func isInstalled() -> Bool {
-        fileManager.fileExists(atPath: installMarkerPath)
+    public static func encode(_ response: NTFSHelperResponse) throws -> Data {
+        var data = try JSONEncoder().encode(response)
+        data.append(0x0A)
+        return data
     }
 
-    public func installPlan(bundledInstallerPkgPath: String) -> CommandPlan {
-        let escapedPath = bundledInstallerPkgPath.replacingOccurrences(of: "'", with: "'\\''")
-        let shellCommand = "installer -pkg '\(escapedPath)' -target /"
-        let escapedShellCommand = shellCommand.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        return CommandPlan(
-            executable: "/usr/bin/osascript",
-            arguments: ["-e", "do shell script \"\(escapedShellCommand)\" with administrator privileges"]
-        )
+    public static func decodeRequest(_ data: Data) throws -> NTFSHelperRequest {
+        try JSONDecoder().decode(NTFSHelperRequest.self, from: trimmedTrailingNewline(data))
+    }
+
+    public static func decodeResponse(_ data: Data) throws -> NTFSHelperResponse {
+        try JSONDecoder().decode(NTFSHelperResponse.self, from: trimmedTrailingNewline(data))
+    }
+
+    private static func trimmedTrailingNewline(_ data: Data) -> Data {
+        guard data.last == 0x0A else { return data }
+        return data.dropLast()
+    }
+}
+
+public enum NTFSHelperRequestValidator {
+    public static func validate(_ request: NTFSHelperRequest) -> String? {
+        guard request.mountPoint.hasPrefix("/Volumes/") else {
+            return "mountPoint must be under /Volumes"
+        }
+        if request.action == .mount, request.devicePath == nil {
+            return "devicePath is required for mount"
+        }
+        return nil
     }
 }
 ```
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 全部 `PASS`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/AutoVolumeShared/NTFSDriverInstaller.swift ManualTests/AutoVolumeManualTests.swift
-git commit -m "feat: add NTFSDriverInstaller for one-time admin-privileged FUSE-T install"
+git add Sources/AutoVolumeShared/NTFSHelperProtocol.swift ManualTests/AutoVolumeManualTests.swift
+git commit -m "feat: add NTFSHelperProtocol shared types for Agent-to-helper IPC"
 ```
 
 ---
 
-### Task 6: `NTFSMountPlanner`（卸载只读挂载 + ntfs-3g 读写挂载的 CommandPlan）
+### Task 6: `NTFSMountPlanner`（Helper 内部使用——卸载只读挂载 + ntfs-3g 读写挂载的 CommandPlan）
 
 推荐模型：sonnet 5。
+
+**说明：** 内容与原设计不变，唯一区别是消费方：现在是 `NTFSPrivilegedHelper`（Task 7，root 进程）调用它构造实际命令，而不是 `AutoVolumeAgent`。`ntfs3gPath` 的值现在应该是 `NTFSDriverPaths.ntfs3gExecutablePath`（Task 5），由 Task 7 传入。
 
 **Files:**
 - Create: `Sources/AutoVolumeShared/NTFSMountPlanner.swift`
@@ -556,13 +612,13 @@ git commit -m "feat: add NTFSDriverInstaller for one-time admin-privileged FUSE-
       public func mountReadWritePlan(devicePath: String, mountPoint: String) -> CommandPlan
   }
   ```
-  供 Task 8 使用。挂载命令直接取自 Task 1 调研文档记录的 `ntfs-3g <devicePath> <mountPoint> -olocal -oallow_other -oauto_xattr`；卸载复用现有 `diskutil unmount`（与 `MountPlanner.unmountPlan` 相同命令，不新增卸载逻辑）。
+  供 Task 7（`NTFSPrivilegedHelper`）使用。挂载命令直接取自 Task 1 调研文档记录的 `ntfs-3g <devicePath> <mountPoint> -olocal -oallow_other -oauto_xattr`；卸载复用现有 `diskutil unmount`（与 `MountPlanner.unmountPlan` 相同命令，不新增卸载逻辑）。
 
 - [ ] **Step 1: 写失败测试**
 
 ```swift
 func testNTFSMountPlannerUnmountUsesDiskutil() throws {
-    let planner = NTFSMountPlanner(ntfs3gPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g")
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
 
     let plan = planner.unmountReadOnlyPlan(mountPoint: "/Volumes/USB")
 
@@ -571,11 +627,11 @@ func testNTFSMountPlannerUnmountUsesDiskutil() throws {
 }
 
 func testNTFSMountPlannerMountUsesBundledNtfs3g() throws {
-    let planner = NTFSMountPlanner(ntfs3gPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g")
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
 
     let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB")
 
-    try expect(plan.executable == "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g", "Mount plan should invoke the bundled ntfs-3g binary")
+    try expect(plan.executable == NTFSDriverPaths.ntfs3gExecutablePath, "Mount plan should invoke the installed ntfs-3g binary")
     try expect(plan.arguments == ["/dev/disk4s1", "/Volumes/USB", "-olocal", "-oallow_other", "-oauto_xattr"], "Mount plan arguments did not match the researched invocation")
 }
 ```
@@ -589,7 +645,7 @@ func testNTFSMountPlannerMountUsesBundledNtfs3g() throws {
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 编译失败（类型不存在）
 
 - [ ] **Step 3: 实现**
@@ -619,7 +675,7 @@ public struct NTFSMountPlanner {
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 全部 `PASS`
 
 - [ ] **Step 5: Commit**
@@ -631,7 +687,473 @@ git commit -m "feat: add NTFSMountPlanner for ntfs-3g read-write remount command
 
 ---
 
-### Task 7: `NTFSRemountDebouncer`（防止我们自己触发的挂载事件被重复处理）
+### Task 7: `NTFSPrivilegedHelper`（root LaunchDaemon 本体）— **安全敏感，实现后需要 security-reviewer 复核**
+
+推荐模型：sonnet 5 实现；**完成后必须派发一次 `security-reviewer` agent 复核这个任务的 diff**（本项目全局 CLAUDE.md 规则：安全敏感代码必须过 security-reviewer），重点检查：peer credential 校验是否可被绕过、socket 文件权限、`NTFSHelperRequestValidator` 是否在处理请求前被无条件调用、是否有除挂载/卸载之外的任何命令注入面。这一条复核在本任务的 task review 之外**额外**执行，是本任务"完成"的必要条件之一。
+
+**Files:**
+- Create: `Sources/AutoVolumeNTFSHelper/main.swift`（新可执行目标，产出 `NTFSPrivilegedHelper`）
+- Create: `Resources/com.autovolume.ntfshelper.plist`（LaunchDaemon plist）
+
+**说明：** 本任务是本地 socket 服务器的运行时"glue"代码（类似现有 `Sources/AutoVolumeAgent/main.swift` 的定位），不含可脱离真实 socket/进程环境单元测试的逻辑——所有可测试的判断逻辑（请求校验、挂载命令构造）已经在 Task 5/6 里实现并测试过，本任务只是把它们接起来监听 socket。因此本任务没有 Step 1/2（写测试/确认失败），直接实现 + 手动构建验证。
+
+**Interfaces:**
+- Consumes：`NTFSHelperSocket`、`NTFSHelperRequest`、`NTFSHelperResponse`、`NTFSHelperWireFormat`、`NTFSHelperRequestValidator`（Task 5）、`NTFSMountPlanner`、`NTFSDriverPaths`（Task 6/5）、`CommandRunner`/`ProcessCommandRunner`（既有）。
+- Produces：一个监听 `NTFSHelperSocket.path` 的常驻可执行文件，供 Task 8（安装脚本会把它复制到 `NTFSHelperSocket.helperInstallPath` 并注册为 LaunchDaemon）、Task 9（Agent 侧客户端连接它）使用。
+
+- [ ] **Step 1: 实现 `NTFSPrivilegedHelper` 主循环**
+
+创建 `Sources/AutoVolumeNTFSHelper/main.swift`：
+
+```swift
+import Foundation
+import Darwin
+import AutoVolumeShared
+
+let socketPath = NTFSHelperSocket.path
+unlink(socketPath)
+
+let serverSocket = socket(AF_UNIX, SOCK_STREAM, 0)
+guard serverSocket >= 0 else {
+    fputs("NTFSPrivilegedHelper: failed to create socket (errno \(errno))\n", stderr)
+    exit(1)
+}
+
+var addr = sockaddr_un()
+addr.sun_family = sa_family_t(AF_UNIX)
+let pathBytes = Array(socketPath.utf8CString)
+withUnsafeMutableBytes(of: &addr.sun_path) { rawBuffer in
+    let buffer = rawBuffer.bindMemory(to: CChar.self)
+    for index in 0..<min(pathBytes.count, buffer.count) {
+        buffer[index] = pathBytes[index]
+    }
+}
+
+let addrSize = socklen_t(MemoryLayout<sockaddr_un>.size)
+let bindResult = withUnsafePointer(to: &addr) { pointer -> Int32 in
+    pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        bind(serverSocket, sockaddrPointer, addrSize)
+    }
+}
+guard bindResult == 0 else {
+    fputs("NTFSPrivilegedHelper: bind failed (errno \(errno))\n", stderr)
+    exit(1)
+}
+chmod(socketPath, 0o666)
+guard listen(serverSocket, 8) == 0 else {
+    fputs("NTFSPrivilegedHelper: listen failed (errno \(errno))\n", stderr)
+    exit(1)
+}
+
+let mountPlanner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+let commandRunner = ProcessCommandRunner()
+
+func peerUID(of fileDescriptor: Int32) -> uid_t? {
+    var credential = xucred()
+    var credentialSize = socklen_t(MemoryLayout<xucred>.size)
+    guard getsockopt(fileDescriptor, 0, LOCAL_PEERCRED, &credential, &credentialSize) == 0 else { return nil }
+    return credential.cr_uid
+}
+
+func respond(_ response: NTFSHelperResponse, on clientSocket: Int32) {
+    guard let encoded = try? NTFSHelperWireFormat.encode(response) else { return }
+    encoded.withUnsafeBytes { buffer in
+        _ = write(clientSocket, buffer.baseAddress, buffer.count)
+    }
+}
+
+func handle(clientSocket: Int32) {
+    defer { close(clientSocket) }
+
+    guard let uid = peerUID(of: clientSocket), uid != 0 else {
+        respond(NTFSHelperResponse(success: false, message: "unauthorized"), on: clientSocket)
+        return
+    }
+
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    let bytesRead = read(clientSocket, &buffer, buffer.count)
+    guard bytesRead > 0 else { return }
+    let requestData = Data(buffer[0..<bytesRead])
+
+    do {
+        let request = try NTFSHelperWireFormat.decodeRequest(requestData)
+        if let validationError = NTFSHelperRequestValidator.validate(request) {
+            respond(NTFSHelperResponse(success: false, message: validationError), on: clientSocket)
+            return
+        }
+
+        switch request.action {
+        case .mount:
+            guard let devicePath = request.devicePath else {
+                respond(NTFSHelperResponse(success: false, message: "devicePath is required for mount"), on: clientSocket)
+                return
+            }
+            _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: request.mountPoint))
+            let mountResult = try commandRunner.run(mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: request.mountPoint))
+            respond(NTFSHelperResponse(success: mountResult.exitCode == 0, message: mountResult.stderr), on: clientSocket)
+        case .unmount:
+            let result = try commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: request.mountPoint))
+            respond(NTFSHelperResponse(success: result.exitCode == 0, message: result.stderr), on: clientSocket)
+        }
+    } catch {
+        respond(NTFSHelperResponse(success: false, message: error.localizedDescription), on: clientSocket)
+    }
+}
+
+while true {
+    let clientSocket = accept(serverSocket, nil, nil)
+    guard clientSocket >= 0 else { continue }
+    handle(clientSocket: clientSocket)
+}
+```
+
+- [ ] **Step 2: 创建 LaunchDaemon plist**
+
+创建 `Resources/com.autovolume.ntfshelper.plist`：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.autovolume.ntfshelper</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/PrivilegedHelperTools/com.autovolume.ntfshelper</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+```
+
+（`Label` 和 `ProgramArguments` 的值必须与 `NTFSHelperSocket.daemonLabel`、`NTFSHelperSocket.helperInstallPath` 保持一致，Task 8 的安装脚本依赖这个一致性。）
+
+- [ ] **Step 3: 手动验证编译通过**
+
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 swiftc -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -target arm64-apple-macosx14.0 -parse Sources/AutoVolumeNTFSHelper/main.swift -I <指向已编译的 AutoVolumeShared.swiftmodule 目录，参照 Task 13 构建脚本里其他可执行目标的编译方式>`
+Expected: 无编译错误。完整构建接入留到 Task 13（此时项目构建脚本还没有加入这个新的可执行目标，属预期）。
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add Sources/AutoVolumeNTFSHelper/main.swift Resources/com.autovolume.ntfshelper.plist
+git commit -m "feat: add NTFSPrivilegedHelper LaunchDaemon for root-level NTFS mount/unmount"
+```
+
+- [ ] **Step 5: 派发 security-reviewer 复核（本任务完成的必要条件）**
+
+对本任务的 diff 派发一次 `security-reviewer` agent 复核，重点见本任务开头的说明。若复核发现问题，在本任务范围内修复后重新运行 Step 3 验证编译，再重新提交一次 commit。
+
+---
+
+### Task 8: `NTFSDriverInstaller`（安装 FUSE-T + Helper + LaunchDaemon，一次管理员密码授权完成全部）
+
+推荐模型：sonnet 5。
+
+**说明：** 这是原设计里 `NTFSDriverInstaller` 的修订版——不再只安装 FUSE-T，而是把 FUSE-T pkg 安装、ntfs-3g 二进制拷贝、`NTFSPrivilegedHelper` 安装、LaunchDaemon 注册全部合并进**同一次** `osascript ... with administrator privileges` 调用，确保用户只需要输入一次密码。
+
+**Files:**
+- Create: `Sources/AutoVolumeShared/NTFSDriverInstaller.swift`
+- Test: `ManualTests/AutoVolumeManualTests.swift`
+
+**Interfaces:**
+- Consumes：`CommandPlan`（既有）、`NTFSDriverPaths`、`NTFSHelperSocket`（Task 5）
+- Produces：
+  ```swift
+  public struct NTFSDriverInstaller {
+      public init(fileManager: FileManager = .default, fuseTMarkerPath: String = "/Library/Application Support/fuse-t/uninstall.sh")
+      public func isFUSETInstalled() -> Bool
+      public func isHelperInstalled() -> Bool   // 检测 NTFSHelperSocket.daemonPlistInstallPath 是否存在
+      public func isFullyInstalled() -> Bool   // isFUSETInstalled() && isHelperInstalled()
+      public func installPlan(bundledInstallerPkgPath: String, bundledHelperExecutablePath: String, bundledDaemonPlistPath: String, bundledNTFS3GPath: String, bundledNTFS3GDylibPath: String) -> CommandPlan
+  }
+  ```
+  供 Task 11（`NTFSAutoMountService`）使用。`installPlan` 构造的 `CommandPlan` 在**不需要 root 权限的 Agent 进程内**执行（`osascript` 自己会弹出管理员密码授权对话框，这与现有 App 里其他需要提权的操作方式一致，不需要 Agent 自身是特权进程）。
+
+- [ ] **Step 1: 写失败测试**
+
+```swift
+func testNTFSDriverInstallerDetectsFUSETInstalledMarker() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let markerPath = directory.appendingPathComponent("uninstall.sh").path
+    try "".write(toFile: markerPath, atomically: true, encoding: .utf8)
+
+    let installer = NTFSDriverInstaller(fuseTMarkerPath: markerPath)
+
+    try expect(installer.isFUSETInstalled() == true, "Installer should report FUSE-T installed when the marker file exists")
+}
+
+func testNTFSDriverInstallerDetectsFUSETMissingMarker() throws {
+    let installer = NTFSDriverInstaller(fuseTMarkerPath: "/tmp/\(UUID().uuidString)/does-not-exist.sh")
+
+    try expect(installer.isFUSETInstalled() == false, "Installer should report FUSE-T not installed when the marker file is missing")
+}
+
+func testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence() throws {
+    let installer = NTFSDriverInstaller()
+
+    let matchesRealFilesystemState = installer.isHelperInstalled() == FileManager.default.fileExists(atPath: NTFSHelperSocket.daemonPlistInstallPath)
+
+    try expect(matchesRealFilesystemState, "isHelperInstalled() should reflect whether the daemon plist exists on disk")
+}
+
+func testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan() throws {
+    let installer = NTFSDriverInstaller()
+
+    let plan = installer.installPlan(
+        bundledInstallerPkgPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/fuse-t-installer.pkg",
+        bundledHelperExecutablePath: "/Applications/AutoVolume.app/Contents/Resources/NTFSPrivilegedHelper",
+        bundledDaemonPlistPath: "/Applications/AutoVolume.app/Contents/Resources/com.autovolume.ntfshelper.plist",
+        bundledNTFS3GPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g",
+        bundledNTFS3GDylibPath: "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib"
+    )
+
+    try expect(plan.executable == "/usr/bin/osascript", "Install plan should run through osascript for a single admin-privileged prompt")
+    try expect(plan.arguments.count == 2 && plan.arguments[0] == "-e", "Install plan should be a single osascript -e invocation")
+    let script = plan.arguments[1]
+    try expect(script.contains("with administrator privileges"), "Install plan must request administrator privileges")
+    try expect(script.contains("installer -pkg"), "Install plan must install the bundled FUSE-T pkg")
+    try expect(script.contains(NTFSHelperSocket.helperInstallPath), "Install plan must copy the helper to its install path")
+    try expect(script.contains(NTFSHelperSocket.daemonPlistInstallPath), "Install plan must copy the LaunchDaemon plist to its install path")
+    try expect(script.contains("launchctl bootstrap system"), "Install plan must bootstrap the LaunchDaemon")
+}
+```
+
+添加到 `tests` 数组：
+
+```swift
+    ("NTFSDriverInstaller detects FUSE-T installed marker", testNTFSDriverInstallerDetectsFUSETInstalledMarker),
+    ("NTFSDriverInstaller detects FUSE-T missing marker", testNTFSDriverInstallerDetectsFUSETMissingMarker),
+    ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),
+    ("NTFSDriverInstaller builds single admin-privileged install plan", testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan),
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
+Expected: 编译失败（类型不存在）
+
+- [ ] **Step 3: 实现**
+
+```swift
+import Foundation
+
+public struct NTFSDriverInstaller {
+    private let fileManager: FileManager
+    private let fuseTMarkerPath: String
+
+    public init(fileManager: FileManager = .default, fuseTMarkerPath: String = "/Library/Application Support/fuse-t/uninstall.sh") {
+        self.fileManager = fileManager
+        self.fuseTMarkerPath = fuseTMarkerPath
+    }
+
+    public func isFUSETInstalled() -> Bool {
+        fileManager.fileExists(atPath: fuseTMarkerPath)
+    }
+
+    public func isHelperInstalled() -> Bool {
+        fileManager.fileExists(atPath: NTFSHelperSocket.daemonPlistInstallPath)
+    }
+
+    public func isFullyInstalled() -> Bool {
+        isFUSETInstalled() && isHelperInstalled()
+    }
+
+    public func installPlan(
+        bundledInstallerPkgPath: String,
+        bundledHelperExecutablePath: String,
+        bundledDaemonPlistPath: String,
+        bundledNTFS3GPath: String,
+        bundledNTFS3GDylibPath: String
+    ) -> CommandPlan {
+        let driverDir = NTFSDriverPaths.installDirectory
+        let shellCommand = """
+        set -e
+        installer -pkg '\(shellEscaped(bundledInstallerPkgPath))' -target /
+        mkdir -p '\(shellEscaped(driverDir))'
+        cp '\(shellEscaped(bundledNTFS3GPath))' '\(shellEscaped(NTFSDriverPaths.ntfs3gExecutablePath))'
+        cp '\(shellEscaped(bundledNTFS3GDylibPath))' '\(shellEscaped(NTFSDriverPaths.ntfs3gDylibPath))'
+        chmod 755 '\(shellEscaped(NTFSDriverPaths.ntfs3gExecutablePath))'
+        cp '\(shellEscaped(bundledHelperExecutablePath))' '\(shellEscaped(NTFSHelperSocket.helperInstallPath))'
+        chown root:wheel '\(shellEscaped(NTFSHelperSocket.helperInstallPath))'
+        chmod 544 '\(shellEscaped(NTFSHelperSocket.helperInstallPath))'
+        cp '\(shellEscaped(bundledDaemonPlistPath))' '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
+        chown root:wheel '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
+        chmod 644 '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
+        launchctl bootstrap system '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
+        """
+        let escapedShellCommand = shellCommand
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return CommandPlan(
+            executable: "/usr/bin/osascript",
+            arguments: ["-e", "do shell script \"\(escapedShellCommand)\" with administrator privileges"]
+        )
+    }
+
+    private func shellEscaped(_ value: String) -> String {
+        value.replacingOccurrences(of: "'", with: "'\\''")
+    }
+}
+```
+
+- [ ] **Step 4: 运行确认通过**
+
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
+Expected: 全部 `PASS`
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Sources/AutoVolumeShared/NTFSDriverInstaller.swift ManualTests/AutoVolumeManualTests.swift
+git commit -m "feat: add NTFSDriverInstaller for one-shot FUSE-T + privileged helper install"
+```
+
+---
+
+### Task 9: `NTFSHelperClient`（Agent 侧 socket 客户端）
+
+推荐模型：sonnet 5。
+
+**Files:**
+- Create: `Sources/AutoVolumeShared/NTFSHelperClient.swift`
+- Test: `ManualTests/AutoVolumeManualTests.swift`
+
+**Interfaces:**
+- Consumes：`NTFSHelperRequest`、`NTFSHelperResponse`、`NTFSHelperWireFormat`、`NTFSHelperSocket`（Task 5）
+- Produces：
+  ```swift
+  public protocol NTFSHelperClientProtocol {
+      func send(_ request: NTFSHelperRequest) -> NTFSHelperResponse
+  }
+  public struct NTFSHelperClient: NTFSHelperClientProtocol {
+      public init(socketPath: String = NTFSHelperSocket.path)
+      public func send(_ request: NTFSHelperRequest) -> NTFSHelperResponse
+  }
+  ```
+  供 Task 11（`NTFSAutoMountService`）使用；协议化是为了让 Task 11 的测试可以注入一个 `RecordingHelperClient` 假实现，不需要真实连接 socket。`NTFSHelperClient.send` 内部：连接 Unix domain socket → 写入编码后的请求 → 读取响应 → 解码；任何 socket/编解码失败都返回 `NTFSHelperResponse(success: false, message: "...")`，不 `throw`（调用方总能拿到一个明确的结果，不需要处理 socket 层错误）。
+
+- [ ] **Step 1: 写失败测试——只测试对 socket 不存在时的降级行为（真实 socket 通信是运行时集成行为，交给用户用真机自测，见 Task 13）**
+
+```swift
+func testNTFSHelperClientReturnsFailureWhenSocketMissing() throws {
+    let client = NTFSHelperClient(socketPath: "/tmp/\(UUID().uuidString)/does-not-exist.sock")
+
+    let response = client.send(NTFSHelperRequest(action: .unmount, mountPoint: "/Volumes/USB"))
+
+    try expect(response.success == false, "Sending to a non-existent socket should return a failure response, not crash or throw")
+}
+
+func testNTFSHelperClientConformsToProtocol() throws {
+    let client: NTFSHelperClientProtocol = NTFSHelperClient(socketPath: "/tmp/\(UUID().uuidString)/does-not-exist.sock")
+
+    let response = client.send(NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB"))
+
+    try expect(response.success == false, "NTFSHelperClient should be usable through NTFSHelperClientProtocol")
+}
+```
+
+添加到 `tests` 数组：
+
+```swift
+    ("NTFSHelperClient returns failure when socket missing", testNTFSHelperClientReturnsFailureWhenSocketMissing),
+    ("NTFSHelperClient conforms to NTFSHelperClientProtocol", testNTFSHelperClientConformsToProtocol),
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
+Expected: 编译失败（类型不存在）
+
+- [ ] **Step 3: 实现**
+
+```swift
+import Foundation
+import Darwin
+
+public protocol NTFSHelperClientProtocol {
+    func send(_ request: NTFSHelperRequest) -> NTFSHelperResponse
+}
+
+public struct NTFSHelperClient: NTFSHelperClientProtocol {
+    private let socketPath: String
+
+    public init(socketPath: String = NTFSHelperSocket.path) {
+        self.socketPath = socketPath
+    }
+
+    public func send(_ request: NTFSHelperRequest) -> NTFSHelperResponse {
+        let clientSocket = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard clientSocket >= 0 else {
+            return NTFSHelperResponse(success: false, message: "failed to create socket")
+        }
+        defer { close(clientSocket) }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(socketPath.utf8CString)
+        withUnsafeMutableBytes(of: &addr.sun_path) { rawBuffer in
+            let buffer = rawBuffer.bindMemory(to: CChar.self)
+            for index in 0..<min(pathBytes.count, buffer.count) {
+                buffer[index] = pathBytes[index]
+            }
+        }
+
+        let addrSize = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let connectResult = withUnsafePointer(to: &addr) { pointer -> Int32 in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                connect(clientSocket, sockaddrPointer, addrSize)
+            }
+        }
+        guard connectResult == 0 else {
+            return NTFSHelperResponse(success: false, message: "could not connect to NTFSPrivilegedHelper (errno \(errno))")
+        }
+
+        guard let requestData = try? NTFSHelperWireFormat.encode(request) else {
+            return NTFSHelperResponse(success: false, message: "failed to encode request")
+        }
+        let bytesWritten = requestData.withUnsafeBytes { buffer -> Int in
+            write(clientSocket, buffer.baseAddress, buffer.count)
+        }
+        guard bytesWritten == requestData.count else {
+            return NTFSHelperResponse(success: false, message: "failed to write request")
+        }
+
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let bytesRead = read(clientSocket, &buffer, buffer.count)
+        guard bytesRead > 0 else {
+            return NTFSHelperResponse(success: false, message: "no response from NTFSPrivilegedHelper")
+        }
+
+        guard let response = try? NTFSHelperWireFormat.decodeResponse(Data(buffer[0..<bytesRead])) else {
+            return NTFSHelperResponse(success: false, message: "failed to decode response")
+        }
+        return response
+    }
+}
+```
+
+- [ ] **Step 4: 运行确认通过**
+
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
+Expected: 全部 `PASS`
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Sources/AutoVolumeShared/NTFSHelperClient.swift ManualTests/AutoVolumeManualTests.swift
+git commit -m "feat: add NTFSHelperClient for Agent-side helper socket IPC"
+```
+
+---
+
+### Task 10: `NTFSRemountDebouncer`（防止我们自己触发的挂载事件被重复处理）
 
 推荐模型：sonnet 5。
 
@@ -648,7 +1170,7 @@ git commit -m "feat: add NTFSMountPlanner for ntfs-3g read-write remount command
       public func markProcessed(bsdName: String, at date: Date = Date())
   }
   ```
-  供 Task 8 使用：ntfs-3g 挂载成功后，DiskArbitration 会再次为新挂载点触发一次 appeared 回调，必须能识别"这是我们自己刚处理过的设备"从而跳过，避免死循环。
+  供 Task 11 使用：ntfs-3g 挂载成功后，DiskArbitration 会再次为新挂载点触发一次 appeared 回调，必须能识别"这是我们自己刚处理过的设备"从而跳过，避免死循环。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -689,7 +1211,7 @@ func testNTFSRemountDebouncerTracksDevicesIndependently() throws {
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 编译失败（类型不存在）
 
 - [ ] **Step 3: 实现**
@@ -723,7 +1245,7 @@ public final class NTFSRemountDebouncer {
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 全部 `PASS`
 
 - [ ] **Step 5: Commit**
@@ -735,9 +1257,11 @@ git commit -m "feat: add NTFSRemountDebouncer to prevent remount event loops"
 
 ---
 
-### Task 8: `NTFSAutoMountService`（DiskArbitration 编排）+ 接入 `AutoVolumeAgent`
+### Task 11: `NTFSAutoMountService`（DiskArbitration 编排，经由 Helper 完成挂载）+ 接入 `AutoVolumeAgent`
 
 推荐模型：sonnet 5（编排逻辑用到 DiskArbitration C API，实现时如遇 API 细节问题可切换 opus 5.2 排查）。
+
+**说明：** 与原设计的关键区别——本服务**不再**直接用 `CommandRunner` 调用 `ntfs-3g`；实际挂载/卸载改为通过 `NTFSHelperClientProtocol` 发送请求给 `NTFSPrivilegedHelper`（Task 7/9）。驱动安装（`NTFSDriverInstaller.installPlan`）仍然由 `AutoVolumeAgent`（无权限进程）通过 `commandRunner` 触发——这一步本身就是 `osascript ... with administrator privileges`，会自己弹出密码框，不需要 Agent 是特权进程。
 
 **Files:**
 - Create: `Sources/AutoVolumeShared/NTFSAutoMountService.swift`
@@ -745,25 +1269,34 @@ git commit -m "feat: add NTFSRemountDebouncer to prevent remount event loops"
 - Test: `ManualTests/AutoVolumeManualTests.swift`
 
 **Interfaces:**
-- Consumes：`NTFSDiskClassifier`（Task 3）、`NTFSMountedVolumesStore`（Task 4）、`NTFSDriverInstaller`（Task 5）、`NTFSMountPlanner`（Task 6）、`NTFSRemountDebouncer`（Task 7）、`CommandRunner`（既有）、`AlertStore`（既有，用于一次性提醒）。
+- Consumes：`NTFSDiskClassifier`（Task 3）、`NTFSMountedVolumesStore`（Task 4）、`NTFSDriverInstaller`（Task 8）、`NTFSHelperClientProtocol`/`NTFSHelperRequest`（Task 5/9）、`NTFSRemountDebouncer`（Task 10）、`CommandRunner`（既有，仅用于驱动安装）、`AlertStore`（既有，用于一次性提醒）。
 - Produces：
   ```swift
   public final class NTFSAutoMountService {
       public init(
           settingsStore: AppSettingsStore = JSONAppSettingsStore(),
           driverInstaller: NTFSDriverInstaller = NTFSDriverInstaller(),
-          mountPlanner: NTFSMountPlanner,
+          helperClient: NTFSHelperClientProtocol = NTFSHelperClient(),
           mountedVolumesStore: NTFSMountedVolumesStore = NTFSMountedVolumesStore(),
           commandRunner: CommandRunner = ProcessCommandRunner(),
           alertStore: AlertStore = AlertStore(),
-          debouncer: NTFSRemountDebouncer = NTFSRemountDebouncer()
+          debouncer: NTFSRemountDebouncer = NTFSRemountDebouncer(),
+          bundledInstallerPaths: NTFSBundledInstallerPaths = NTFSBundledInstallerPaths()
       )
       public static let onboardingAlertID: UUID
       public func handleDiskEligibleForReadWrite(bsdName: String, devicePath: String, volumeName: String, mountPoint: String, filesystemPersonality: String?, mountedFileSystemName: String?)
       public func handleDiskDisappeared(bsdName: String)
   }
+  public struct NTFSBundledInstallerPaths {
+      public var fuseTInstallerPkgPath: String
+      public var helperExecutablePath: String
+      public var daemonPlistPath: String
+      public var ntfs3gPath: String
+      public var ntfs3gDylibPath: String
+      public init(bundle: Bundle = .main)   // 用 Bundle.main 定位 App bundle 内的 Resources，取不到时回退到 /Applications/AutoVolume.app/Contents/Resources/... 的默认路径
+  }
   ```
-  `handleDiskEligibleForReadWrite`/`handleDiskDisappeared` 是从 DiskArbitration 回调中提取好字段后调用的纯编排入口，方便测试时绕过真实 DiskArbitration 会话直接调用。
+  `handleDiskEligibleForReadWrite`/`handleDiskDisappeared` 是从 DiskArbitration 回调中提取好字段后调用的纯编排入口，方便测试时绕过真实 DiskArbitration 会话直接调用。`NTFSBundledInstallerPaths` 把原来散落在 `Bundle.main.path(forResource:...)` 里的逻辑收成一个可注入的小结构体，方便测试用固定字符串路径构造。
 
 - [ ] **Step 1: 写失败测试——设置关闭时只记录一次性提醒，不挂载**
 
@@ -780,11 +1313,12 @@ func testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled() throws 
     let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
     try settingsStore.save(AppSettings(autoMountNTFSReadWrite: false))
     let commandRunner = RecordingCommandRunner()
+    let helperClient = RecordingHelperClient()
     let alertStore = AlertStore(directory: alertsDirectory)
     let service = NTFSAutoMountService(
         settingsStore: settingsStore,
-        driverInstaller: NTFSDriverInstaller(installMarkerPath: "/tmp/\(UUID().uuidString)/missing"),
-        mountPlanner: NTFSMountPlanner(ntfs3gPath: "/tmp/unused-ntfs-3g"),
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/tmp/\(UUID().uuidString)/missing"),
+        helperClient: helperClient,
         mountedVolumesStore: NTFSMountedVolumesStore(directory: volumesDirectory),
         commandRunner: commandRunner,
         alertStore: alertStore
@@ -792,7 +1326,8 @@ func testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled() throws 
 
     service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
 
-    try expect(commandRunner.plans.isEmpty, "No mount commands should run while the setting is disabled")
+    try expect(commandRunner.plans.isEmpty, "No install commands should run while the setting is disabled")
+    try expect(helperClient.sentRequests.isEmpty, "No helper requests should be sent while the setting is disabled")
     let alerts = try alertStore.load()
     try expect(alerts.contains { $0.volumeID == NTFSAutoMountService.onboardingAlertID }, "A one-time onboarding alert should be recorded when an NTFS drive is seen with the setting disabled")
 }
@@ -803,10 +1338,11 @@ func testNTFSAutoMountServiceSkipsWhenAlreadyOwnedByOurDriver() throws {
     let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
     try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
     let commandRunner = RecordingCommandRunner()
+    let helperClient = RecordingHelperClient()
     let service = NTFSAutoMountService(
         settingsStore: settingsStore,
-        driverInstaller: NTFSDriverInstaller(installMarkerPath: "/tmp/\(UUID().uuidString)/missing"),
-        mountPlanner: NTFSMountPlanner(ntfs3gPath: "/tmp/unused-ntfs-3g"),
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/tmp/\(UUID().uuidString)/missing"),
+        helperClient: helperClient,
         mountedVolumesStore: NTFSMountedVolumesStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
         commandRunner: commandRunner,
         alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
@@ -815,9 +1351,10 @@ func testNTFSAutoMountServiceSkipsWhenAlreadyOwnedByOurDriver() throws {
     service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "fusefs_ntfs")
 
     try expect(commandRunner.plans.isEmpty, "Disks already mounted by our own driver should not be reprocessed")
+    try expect(helperClient.sentRequests.isEmpty, "Disks already mounted by our own driver should not trigger a helper request")
 }
 
-func testNTFSAutoMountServiceInstallsDriverThenRemountsReadWrite() throws {
+func testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest() throws {
     let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let markerDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -831,11 +1368,12 @@ func testNTFSAutoMountServiceInstallsDriverThenRemountsReadWrite() throws {
     let markerPath = markerDirectory.appendingPathComponent("uninstall.sh").path
     // marker does not exist yet: installer must run first
     let commandRunner = RecordingCommandRunner()
+    let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: true))
     let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
     let service = NTFSAutoMountService(
         settingsStore: settingsStore,
-        driverInstaller: NTFSDriverInstaller(installMarkerPath: markerPath),
-        mountPlanner: NTFSMountPlanner(ntfs3gPath: "/tmp/unused-ntfs-3g"),
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: markerPath),
+        helperClient: helperClient,
         mountedVolumesStore: volumesStore,
         commandRunner: commandRunner,
         alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
@@ -843,12 +1381,38 @@ func testNTFSAutoMountServiceInstallsDriverThenRemountsReadWrite() throws {
 
     service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
 
-    try expect(commandRunner.plans.count == 3, "Expected install, unmount, then mount commands; got \(commandRunner.plans.count)")
-    try expect(commandRunner.plans[0].executable == "/usr/bin/osascript", "First command should be the driver install")
-    try expect(commandRunner.plans[1].executable == "/usr/sbin/diskutil", "Second command should unmount the read-only mount")
-    try expect(commandRunner.plans[2].executable == "/tmp/unused-ntfs-3g", "Third command should mount read-write via ntfs-3g")
+    try expect(commandRunner.plans.count == 1, "Expected exactly the driver install command; got \(commandRunner.plans.count)")
+    try expect(commandRunner.plans[0].executable == "/usr/bin/osascript", "The one command run by the Agent should be the driver install")
+    try expect(helperClient.sentRequests.count == 1, "Expected exactly one mount request sent to the helper")
+    try expect(helperClient.sentRequests[0] == NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB"), "Helper request did not match expected mount request")
     let volumes = try volumesStore.load()
     try expect(volumes.contains { $0.bsdName == "disk4s1" }, "The remounted volume should be recorded in NTFSMountedVolumesStore")
+}
+
+func testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+        try? FileManager.default.removeItem(at: volumesDirectory)
+    }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
+    let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: false, message: "mount failed"))
+    let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/Library/Application Support/fuse-t/uninstall.sh"),
+        helperClient: helperClient,
+        mountedVolumesStore: volumesStore,
+        commandRunner: RecordingCommandRunner(),
+        alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+
+    let volumes = try volumesStore.load()
+    try expect(volumes.isEmpty, "A failed helper mount must not be recorded as an active NTFS volume")
 }
 ```
 
@@ -857,48 +1421,85 @@ func testNTFSAutoMountServiceInstallsDriverThenRemountsReadWrite() throws {
 ```swift
     ("NTFSAutoMountService onboarding alert when disabled", testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled),
     ("NTFSAutoMountService skips already-owned mounts", testNTFSAutoMountServiceSkipsWhenAlreadyOwnedByOurDriver),
-    ("NTFSAutoMountService installs driver then remounts", testNTFSAutoMountServiceInstallsDriverThenRemountsReadWrite),
+    ("NTFSAutoMountService installs driver then sends helper mount request", testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest),
+    ("NTFSAutoMountService does not record volume when helper mount fails", testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails),
 ```
 
-（`RecordingCommandRunner` 已存在于 `ManualTests/AutoVolumeManualTests.swift` 文件底部，复用即可，无需新建。）
+同时在 `ManualTests/AutoVolumeManualTests.swift` 文件底部（`RecordingCommandRunner`/`SequenceCommandRunner` 定义附近）新增一个测试替身，供上面几个测试使用：
+
+```swift
+final class RecordingHelperClient: NTFSHelperClientProtocol {
+    var sentRequests: [NTFSHelperRequest] = []
+    private let responseToReturn: NTFSHelperResponse
+
+    init(responseToReturn: NTFSHelperResponse = NTFSHelperResponse(success: true)) {
+        self.responseToReturn = responseToReturn
+    }
+
+    func send(_ request: NTFSHelperRequest) -> NTFSHelperResponse {
+        sentRequests.append(request)
+        return responseToReturn
+    }
+}
+```
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `script/build_and_run.sh --no-launch`
-Expected: 编译失败（`NTFSAutoMountService` 不存在）
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
+Expected: 编译失败（`NTFSAutoMountService`/`RecordingHelperClient` 不存在）
 
 - [ ] **Step 3: 实现 `NTFSAutoMountService`**
 
 ```swift
 import Foundation
 
+public struct NTFSBundledInstallerPaths {
+    public var fuseTInstallerPkgPath: String
+    public var helperExecutablePath: String
+    public var daemonPlistPath: String
+    public var ntfs3gPath: String
+    public var ntfs3gDylibPath: String
+
+    public init(bundle: Bundle = .main) {
+        let resourcesPath = bundle.resourcePath ?? "/Applications/AutoVolume.app/Contents/Resources"
+        self.fuseTInstallerPkgPath = resourcesPath + "/NTFSDriver/fuse-t-installer.pkg"
+        self.helperExecutablePath = resourcesPath + "/NTFSPrivilegedHelper"
+        self.daemonPlistPath = resourcesPath + "/com.autovolume.ntfshelper.plist"
+        self.ntfs3gPath = resourcesPath + "/NTFSDriver/ntfs-3g"
+        self.ntfs3gDylibPath = resourcesPath + "/NTFSDriver/libntfs-3g.89.dylib"
+    }
+}
+
 public final class NTFSAutoMountService {
     public static let onboardingAlertID = UUID(uuidString: "00000000-0000-0000-0000-00000000AF01")!
 
     private let settingsStore: AppSettingsStore
     private let driverInstaller: NTFSDriverInstaller
-    private let mountPlanner: NTFSMountPlanner
+    private let helperClient: NTFSHelperClientProtocol
     private let mountedVolumesStore: NTFSMountedVolumesStore
     private let commandRunner: CommandRunner
     private let alertStore: AlertStore
     private let debouncer: NTFSRemountDebouncer
+    private let bundledInstallerPaths: NTFSBundledInstallerPaths
 
     public init(
         settingsStore: AppSettingsStore = JSONAppSettingsStore(),
         driverInstaller: NTFSDriverInstaller = NTFSDriverInstaller(),
-        mountPlanner: NTFSMountPlanner,
+        helperClient: NTFSHelperClientProtocol = NTFSHelperClient(),
         mountedVolumesStore: NTFSMountedVolumesStore = NTFSMountedVolumesStore(),
         commandRunner: CommandRunner = ProcessCommandRunner(),
         alertStore: AlertStore = AlertStore(),
-        debouncer: NTFSRemountDebouncer = NTFSRemountDebouncer()
+        debouncer: NTFSRemountDebouncer = NTFSRemountDebouncer(),
+        bundledInstallerPaths: NTFSBundledInstallerPaths = NTFSBundledInstallerPaths()
     ) {
         self.settingsStore = settingsStore
         self.driverInstaller = driverInstaller
-        self.mountPlanner = mountPlanner
+        self.helperClient = helperClient
         self.mountedVolumesStore = mountedVolumesStore
         self.commandRunner = commandRunner
         self.alertStore = alertStore
         self.debouncer = debouncer
+        self.bundledInstallerPaths = bundledInstallerPaths
     }
 
     public func handleDiskEligibleForReadWrite(
@@ -923,15 +1524,19 @@ public final class NTFSAutoMountService {
             return
         }
 
-        if !driverInstaller.isInstalled() {
-            let bundledInstallerPath = Bundle.main.path(forResource: "fuse-t-installer", ofType: "pkg", inDirectory: "NTFSDriver")
-                ?? "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/fuse-t-installer.pkg"
-            _ = try? commandRunner.run(driverInstaller.installPlan(bundledInstallerPkgPath: bundledInstallerPath))
+        if !driverInstaller.isFullyInstalled() {
+            let plan = driverInstaller.installPlan(
+                bundledInstallerPkgPath: bundledInstallerPaths.fuseTInstallerPkgPath,
+                bundledHelperExecutablePath: bundledInstallerPaths.helperExecutablePath,
+                bundledDaemonPlistPath: bundledInstallerPaths.daemonPlistPath,
+                bundledNTFS3GPath: bundledInstallerPaths.ntfs3gPath,
+                bundledNTFS3GDylibPath: bundledInstallerPaths.ntfs3gDylibPath
+            )
+            _ = try? commandRunner.run(plan)
         }
 
-        _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
-        let mountResult = try? commandRunner.run(mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint))
-        guard mountResult?.exitCode == 0 else { return }
+        let response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
+        guard response.success else { return }
 
         debouncer.markProcessed(bsdName: bsdName)
         try? mountedVolumesStore.add(NTFSVolume(bsdName: bsdName, volumeName: volumeName, devicePath: devicePath, mountPoint: mountPoint, mountedAt: Date()))
@@ -946,7 +1551,7 @@ public final class NTFSAutoMountService {
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 全部 `PASS`
 
 - [ ] **Step 5: 接入 `AutoVolumeAgent/main.swift`——注册 DiskArbitration 回调**
@@ -954,9 +1559,7 @@ Expected: 全部 `PASS`
 在 `Sources/AutoVolumeAgent/main.swift` 顶部 `import Darwin` 之后添加 `import DiskArbitration`，在文件中 `let alertStore = AlertStore()`（第 21 行）之后添加：
 
 ```swift
-let ntfsBundledBinaryPath = Bundle.main.path(forResource: "ntfs-3g", ofType: nil, inDirectory: "NTFSDriver")
-    ?? "/Applications/AutoVolume.app/Contents/Resources/NTFSDriver/ntfs-3g"
-let ntfsAutoMountService = NTFSAutoMountService(mountPlanner: NTFSMountPlanner(ntfs3gPath: ntfsBundledBinaryPath))
+let ntfsAutoMountService = NTFSAutoMountService()
 
 func startNTFSDiskWatcher() {
     guard let session = DASessionCreate(kCFAllocatorDefault) else { return }
@@ -989,23 +1592,31 @@ func startNTFSDiskWatcher() {
 startNTFSDiskWatcher()
 ```
 
-> 注：`DADiskCopyDescription` 返回的具体 key 名称（`kDADiskDescriptionVolumeKindKey` 是否等价于「文件系统类型」还是需要改用 `kDADiskDescriptionMediaKindKey`）在真实设备上可能与文档不完全一致——这是实现该步骤时唯一允许通过手动插拔真实/虚拟 NTFS 盘临时验证并调整的地方（用 `print(description)` 打印完整字典核对 key），不影响本任务其余部分（Step 1-4）已经落地的可测试逻辑。
+> 注：`DADiskCopyDescription` 返回的具体 key 名称（`kDADiskDescriptionVolumeKindKey` 是否等价于「文件系统类型」还是需要改用 `kDADiskDescriptionMediaKindKey`）在真实设备上可能与文档不完全一致——这是实现该步骤时唯一允许通过手动插拔真实/虚拟 NTFS 盘临时验证并调整的地方（用 `print(description)` 打印完整字典核对 key），不影响本任务其余部分（Step 1-4）已经落地的可测试逻辑。`AutoVolumeAgent` 运行在没有 `Bundle.main` 指向 App bundle 的普通命令行上下文中吗？不会——`AutoVolumeAgent` 本身也是从 `AutoVolume.app/Contents/Resources/AutoVolumeAgent` 启动的，`Bundle.main` 在它里面指向的是 Agent 自己的可执行文件而非 App bundle，因此 `NTFSBundledInstallerPaths()` 默认参数里的 `Bundle.main.resourcePath` 在 Agent 进程里可能拿不到期望的路径——**这里改为显式传入基于 Agent 自身可执行文件位置推导的路径**：把上面 `NTFSAutoMountService()` 一行改成：
+>
+> ```swift
+> let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+> let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
+> let ntfsAutoMountService = NTFSAutoMountService(bundledInstallerPaths: NTFSBundledInstallerPaths(bundle: Bundle(path: appResourcesPath) ?? Bundle.main))
+> ```
+>
+> （`AutoVolumeAgent` 二进制本身就安装在 `Contents/Resources/AutoVolumeAgent`，所以它的上一级目录正是 `Contents/Resources`，与 `NTFSBundledInstallerPaths` 期望的 `resourcePath` 一致。）
 
-- [ ] **Step 6: 构建确认整体编译通过（含 DiskArbitration 框架链接，见 Task 10）**
+- [ ] **Step 6: 构建确认整体编译通过（含 DiskArbitration 框架链接，见 Task 13）**
 
-Run: `script/build_and_run.sh --no-launch`
-Expected: 编译成功、全部 manual tests `PASS`（Task 10 会补上 `-framework DiskArbitration` 链接参数，如果此步先报链接错误属预期，留到 Task 10 解决）
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
+Expected: 编译成功、全部 manual tests `PASS`（Task 13 会补上 `-framework DiskArbitration` 链接参数，如果此步先报链接错误属预期，留到 Task 13 解决）
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add Sources/AutoVolumeShared/NTFSAutoMountService.swift Sources/AutoVolumeAgent/main.swift ManualTests/AutoVolumeManualTests.swift
-git commit -m "feat: wire NTFSAutoMountService into AutoVolumeAgent via DiskArbitration"
+git commit -m "feat: wire NTFSAutoMountService into AutoVolumeAgent via DiskArbitration and the privileged helper"
 ```
 
 ---
 
-### Task 9: Settings 开关 + 一次性提醒展示
+### Task 12: Settings 开关 + 一次性提醒展示
 
 推荐模型：sonnet 5。
 
@@ -1013,7 +1624,7 @@ git commit -m "feat: wire NTFSAutoMountService into AutoVolumeAgent via DiskArbi
 - Modify: `Sources/AutoVolumeApp/SettingsView.swift`
 
 **Interfaces:**
-- Consumes：`AppSettings.autoMountNTFSReadWrite`（Task 2）、`AppViewModel.updateSettings`/`AppViewModel.alerts`（既有，onboarding 提醒已经通过 Task 8 写入的 `AlertStore` 自动出现在既有的提醒铃铛菜单里，无需改动 `ContentView.swift`）。
+- Consumes：`AppSettings.autoMountNTFSReadWrite`（Task 2）、`AppViewModel.updateSettings`/`AppViewModel.alerts`（既有，onboarding 提醒已经通过 Task 11 写入的 `AlertStore` 自动出现在既有的提醒铃铛菜单里，无需改动 `ContentView.swift`）。
 
 - [ ] **Step 1: 修改 `SettingsView` 增加开关（手动验证用例：打开设置面板，勾选后卷列表下次检测到 NTFS 盘应触发读写挂载，取消勾选后应恢复只读且不再弹出一次性提醒）**
 
@@ -1082,7 +1693,7 @@ struct SettingsView: View {
 
 - [ ] **Step 2: 手动验证（这是纯 SwiftUI 绑定改动，本项目 UI 层没有自动化测试覆盖，遵循既有 `VolumeEditorView`/`SettingsView` 的方式——通过 Step 5 的整体构建 + 用户自测 DMG 验证）**
 
-Run: `script/build_and_run.sh --no-launch`
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
 Expected: 编译通过
 
 - [ ] **Step 3: Commit**
@@ -1094,7 +1705,7 @@ git commit -m "feat: add NTFS read-write toggle to Settings"
 
 ---
 
-### Task 10: 构建脚本接入（新文件、DiskArbitration 链接、驱动资源打包）+ 版本发布
+### Task 13: 构建脚本接入（新文件、新可执行目标、DiskArbitration 链接、驱动+Helper 资源打包）+ 版本发布
 
 推荐模型：sonnet 5。
 
@@ -1103,9 +1714,9 @@ git commit -m "feat: add NTFS read-write toggle to Settings"
 - Modify: `Resources/Info.plist`
 
 **Interfaces:**
-- 无新增代码接口；这是把前面所有任务新增的文件正式接入项目"唯一真实"的构建/测试/打包流程。
+- 无新增代码接口；这是把前面所有任务新增的文件正式接入项目"唯一真实"的构建/测试/打包流程，并新增一个可执行目标（`NTFSPrivilegedHelper`）。
 
-- [ ] **Step 1: 在 `script/build_and_run.sh` 的 `AutoVolumeShared` swiftc 文件列表中追加新文件，并链接 DiskArbitration 框架**
+- [ ] **Step 1: 在 `script/build_and_run.sh` 的 `AutoVolumeShared` swiftc 文件列表中追加新文件**
 
 在 `Sources/AutoVolumeShared/AlertStore.swift`（该 swiftc 调用的最后一行输入文件）之后追加：
 
@@ -1113,16 +1724,17 @@ git commit -m "feat: add NTFS read-write toggle to Settings"
   Sources/AutoVolumeShared/AlertStore.swift \
   Sources/AutoVolumeShared/NTFSVolume.swift \
   Sources/AutoVolumeShared/NTFSMountedVolumesStore.swift \
-  Sources/AutoVolumeShared/NTFSDriverInstaller.swift \
+  Sources/AutoVolumeShared/NTFSHelperProtocol.swift \
   Sources/AutoVolumeShared/NTFSMountPlanner.swift \
+  Sources/AutoVolumeShared/NTFSDriverInstaller.swift \
+  Sources/AutoVolumeShared/NTFSHelperClient.swift \
   Sources/AutoVolumeShared/NTFSRemountDebouncer.swift \
-  Sources/AutoVolumeShared/NTFSAutoMountService.swift \
-  -framework DiskArbitration
+  Sources/AutoVolumeShared/NTFSAutoMountService.swift
 ```
 
-（即把最后一行 `Sources/AutoVolumeShared/AlertStore.swift` 改成上面这段，用新文件列表 + `-framework DiskArbitration` 替换原来单独一行的收尾。）
+（即把最后一行 `Sources/AutoVolumeShared/AlertStore.swift` 改成上面这段，用新文件列表替换原来单独一行的收尾。`AutoVolumeShared` 本身不直接使用 DiskArbitration/socket 特有的框架链接，不需要额外 `-framework`。）
 
-同时在编译 `AutoVolumeAgent` 的 `swiftc` 调用里也追加 `-framework DiskArbitration`（因为 Task 8 在 `Sources/AutoVolumeAgent/main.swift` 里直接 `import DiskArbitration` 并调用了它的 C API）：
+在编译 `AutoVolumeAgent` 的 `swiftc` 调用里追加 `-framework DiskArbitration`（因为 Task 11 在 `Sources/AutoVolumeAgent/main.swift` 里直接 `import DiskArbitration` 并调用了它的 C API）：
 
 ```
 swiftc \
@@ -1136,33 +1748,50 @@ swiftc \
   Sources/AutoVolumeAgent/main.swift
 ```
 
-- [ ] **Step 2: 在打包 App bundle 的阶段拷贝并签名驱动资源**
+在同一个 `swiftc` 编译 `AutoVolumeApp`/`AutoVolumeAgent` 的区块之后，新增一个编译 `NTFSPrivilegedHelper` 的调用：
+
+```
+swiftc \
+  -I "$BUILD/shared" \
+  -L "$BUILD/shared" \
+  -lAutoVolumeShared \
+  -Xlinker -rpath \
+  -Xlinker @executable_path/../Frameworks \
+  -o "$BUILD/NTFSPrivilegedHelper" \
+  Sources/AutoVolumeNTFSHelper/main.swift
+```
+
+- [ ] **Step 2: 在打包 App bundle 的阶段拷贝并签名驱动/Helper 资源**
 
 在脚本中 `cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"` 之后、`codesign` 之前添加：
 
 ```bash
 mkdir -p "$APP/Contents/Resources/NTFSDriver"
 cp "$ROOT/Resources/NTFSDriver/ntfs-3g" "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
+cp "$ROOT/Resources/NTFSDriver/libntfs-3g.89.dylib" "$APP/Contents/Resources/NTFSDriver/libntfs-3g.89.dylib"
 cp "$ROOT/Resources/NTFSDriver/fuse-t-installer.pkg" "$APP/Contents/Resources/NTFSDriver/fuse-t-installer.pkg"
 cp "$ROOT/Resources/NTFSDriver/LICENSE-ntfs-3g.txt" "$APP/Contents/Resources/NTFSDriver/LICENSE-ntfs-3g.txt"
 cp "$ROOT/Resources/NTFSDriver/LICENSE-fuse-t.txt" "$APP/Contents/Resources/NTFSDriver/LICENSE-fuse-t.txt"
 chmod +x "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
+cp "$BUILD/NTFSPrivilegedHelper" "$APP/Contents/Resources/NTFSPrivilegedHelper"
+cp "$ROOT/Resources/com.autovolume.ntfshelper.plist" "$APP/Contents/Resources/com.autovolume.ntfshelper.plist"
 ```
 
 并在既有的 `codesign --force --sign - "$APP/Contents/Resources/AutoVolumeAgent"` 之后添加：
 
 ```bash
 codesign --force --sign - "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
+codesign --force --sign - "$APP/Contents/Resources/NTFSPrivilegedHelper"
 ```
 
 - [ ] **Step 3: 按 `CLAUDE.md` 流程升版本号**
 
-编辑 `Resources/Info.plist`：将 `CFBundleShortVersionString` 从当前值（如 `0.1.47`）递增 patch 号，`CFBundleVersion` 同步改为对应的纯数字。
+编辑 `Resources/Info.plist`：将 `CFBundleShortVersionString` 从当前值递增 patch 号，`CFBundleVersion` 同步改为对应的纯数字。
 
 - [ ] **Step 4: 完整构建并运行全部 manual tests**
 
-Run: `script/build_and_run.sh --no-launch`
-Expected: 编译成功（`ntfs-3g`、`DiskArbitration` 链接均通过），全部既有 + 新增 manual tests `PASS`，无遗留失败。
+Run: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMENT_TARGET=14.0 script/build_and_run.sh --no-launch`
+Expected: 编译成功（`ntfs-3g`、`DiskArbitration`、`NTFSPrivilegedHelper` 均构建/链接通过），全部既有 + 新增 manual tests `PASS`，无遗留失败。
 
 - [ ] **Step 5: 打包 DMG**
 
@@ -1173,17 +1802,18 @@ Expected: `dist/AutoVolume-<新版本号>-local.dmg` 生成成功。
 
 ```bash
 git add script/build_and_run.sh Resources/Info.plist
-git commit -m "release: bundle NTFS driver and prepare AutoVolume <新版本号>"
+git commit -m "release: bundle NTFS driver, privileged helper, and prepare AutoVolume <新版本号>"
 ```
 
 - [ ] **Step 7: 交给用户自测**
 
-告知用户新 DMG 路径，请其用真实 NTFS 外接硬盘验证：① 设置关闭时看到一次性提醒但保持只读；② 设置开启后首次插入弹出管理员密码授权、随后自动切换为可读写；③ 拔出后再插入不再重复请求密码、能立即读写；④ 关闭设置开关后新插入的 NTFS 盘恢复只读。不由 Claude 自行判定完成。
+告知用户新 DMG 路径，请其用真实 NTFS 外接硬盘验证：① 设置关闭时看到一次性提醒但保持只读；② 设置开启后首次插入弹出**一次**管理员密码授权（同时安装 FUSE-T + 特权 helper），随后自动切换为可读写；③ 拔出后再插入不再重复请求密码、能立即读写（因为 helper 作为 LaunchDaemon 常驻，不需要重新安装）；④ 关闭设置开关后新插入的 NTFS 盘恢复只读；⑤ 重启 Mac 后 helper 应该自动随 LaunchDaemon 机制启动（`KeepAlive`/`RunAtLoad`），无需重新授权。不由 Claude 自行判定完成。
 
 ---
 
 ## Self-Review 记录
 
-- **Spec 覆盖**：驱动选型（Task 1/6）、实时监控（DiskArbitration，Task 8）、无需 SIP/无需内核扩展（Task 1 选型 + Task 5 安装方式）、内置无需多次配置（Task 5/10 打包 + 一次性管理员授权）、默认关闭 + 一次性提醒（Task 2/8/9）、UI 展示（Task 9，复用既有提醒铃铛）、错误处理（Task 8 的 guard/回退到只读）、测试策略（每个 Task 都在 `ManualTests` 中补充用例）均已覆盖。
-- **占位符扫描**：已移除所有 TBD；两个原 spec "开放问题"通过 Task 1（Spike）转化为具体、已验证的调研结论，后续任务直接引用该结论而非留白。
-- **类型一致性**：`NTFSVolume`、`NTFSDiskClassifier`、`NTFSMountedVolumesStore`、`NTFSDriverInstaller`、`NTFSMountPlanner`、`NTFSRemountDebouncer`、`NTFSAutoMountService` 的方法签名在各任务间保持一致，已交叉核对。
+- **Spec 覆盖**：驱动选型（Task 1/6）、实时监控（DiskArbitration，Task 11）、无需 SIP/无需内核扩展（Task 1 选型 + Task 8 安装方式）、内置无需多次配置（Task 8/13 打包 + 一次管理员授权同时装 FUSE-T 和 helper）、默认关闭 + 一次性提醒（Task 2/11/12）、UI 展示（Task 12，复用既有提醒铃铛）、错误处理（Task 11 的 guard/回退到只读、helper 返回失败时不记录卷）、测试策略（每个纯逻辑 Task 都在 `ManualTests` 中补充用例；Task 7 的 socket 运行时 glue 明确标注不可脱离真实环境单测，留给 Task 13 的整体构建 + 用户自测覆盖）、**权限模型修正**（Task 5-9 新增的 `NTFSPrivilegedHelper` + IPC 协议，解决 Task 1 调研发现的 root 权限问题）均已覆盖。
+- **占位符扫描**：已移除所有 TBD；Task 1 的两个原 spec"开放问题"已通过实际调研（包括权限模型问题的发现）转化为具体、已验证的结论，后续任务直接引用该结论而非留白。
+- **类型一致性**：`NTFSHelperRequest`/`NTFSHelperResponse`/`NTFSHelperClientProtocol`/`NTFSDriverPaths`/`NTFSHelperSocket` 等类型在 Task 5-11 之间的方法签名、字段名已交叉核对一致；`NTFSDriverInstaller` 的方法名从原设计的 `isInstalled()` 改为 `isFUSETInstalled()`/`isHelperInstalled()`/`isFullyInstalled()`，已在 Task 8、Task 11 的所有引用处同步更新，无遗留旧名称引用。
+- **安全审查标记**：Task 7（`NTFSPrivilegedHelper`）在 Global Constraints 和任务正文中都明确标注了必须过 `security-reviewer` 复核，这是本计划里唯一涉及特权守护进程/本地 IPC 的任务，风险最集中，已重点标注。
