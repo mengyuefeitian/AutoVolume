@@ -610,6 +610,11 @@ func testNTFSDriverInstallerBuildsSingleAdminPrivilegedInstallPlan() throws {
     try expect(script.contains(NTFSHelperSocket.helperInstallPath), "Install plan must copy the helper to its install path")
     try expect(script.contains(NTFSHelperSocket.daemonPlistInstallPath), "Install plan must copy the LaunchDaemon plist to its install path")
     try expect(script.contains("launchctl bootstrap system"), "Install plan must bootstrap the LaunchDaemon")
+    try expect(script.contains("launchctl bootout system"), "Install plan must unload any existing LaunchDaemon registration before bootstrapping, to be idempotent")
+    try expect(
+        script.range(of: "launchctl bootout")!.lowerBound < script.range(of: "launchctl bootstrap")!.lowerBound,
+        "Install plan must bootout the LaunchDaemon before bootstrapping it"
+    )
 }
 
 struct FakeMountStateProvider: MountStateProvider {

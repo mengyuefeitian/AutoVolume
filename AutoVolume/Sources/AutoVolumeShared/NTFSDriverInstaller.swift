@@ -42,6 +42,7 @@ public struct NTFSDriverInstaller {
         cp '\(shellEscaped(bundledDaemonPlistPath))' '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
         chown root:wheel '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
         chmod 644 '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
+        launchctl bootout system '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))' 2>/dev/null || true
         launchctl bootstrap system '\(shellEscaped(NTFSHelperSocket.daemonPlistInstallPath))'
         """
         let escapedShellCommand = shellCommand
