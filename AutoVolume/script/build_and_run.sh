@@ -34,7 +34,8 @@ swiftc \
   Sources/AutoVolumeShared/ConnectivityTesting.swift \
   Sources/AutoVolumeShared/SMBPreferencesWriter.swift \
   Sources/AutoVolumeShared/AlertStore.swift \
-  Sources/AutoVolumeShared/NTFSVolume.swift
+  Sources/AutoVolumeShared/NTFSVolume.swift \
+  Sources/AutoVolumeShared/NTFSMountedVolumesStore.swift
 
 swiftc \
   -I "$BUILD/shared" \

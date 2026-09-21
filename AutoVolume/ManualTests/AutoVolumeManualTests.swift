@@ -466,6 +466,38 @@ func testNTFSVolumeRoundTripsThroughJSON() throws {
     try expect(decoded == volume, "NTFSVolume JSON round trip failed")
 }
 
+func testNTFSMountedVolumesStoreAddLoadRemove() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = NTFSMountedVolumesStore(directory: directory)
+
+    let missing = try store.load()
+    try expect(missing == [], "Missing store should load as empty array")
+
+    let volume = NTFSVolume(bsdName: "disk4s1", volumeName: "USB", devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", mountedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    try store.add(volume)
+    let loaded = try store.load()
+    try expect(loaded == [volume], "Added volume did not load back")
+
+    try store.remove(bsdName: "disk4s1")
+    let afterRemove = try store.load()
+    try expect(afterRemove == [], "Removed volume should no longer be present")
+}
+
+func testNTFSMountedVolumesStoreAddReplacesSameBSDName() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = NTFSMountedVolumesStore(directory: directory)
+
+    let first = NTFSVolume(bsdName: "disk4s1", volumeName: "USB", devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", mountedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    let second = NTFSVolume(bsdName: "disk4s1", volumeName: "USB Renamed", devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB Renamed", mountedAt: Date(timeIntervalSince1970: 1_700_000_100))
+    try store.add(first)
+    try store.add(second)
+
+    let loaded = try store.load()
+    try expect(loaded == [second], "Re-adding the same bsdName should replace, not duplicate")
+}
+
 struct FakeMountStateProvider: MountStateProvider {
     let isMounted: Bool
     func isMounted(config: VolumeConfig) -> Bool { isMounted }
@@ -527,7 +559,9 @@ let tests: [(String, () throws -> Void)] = [
     ("MountPlanner shouldOpenFinderAfterMount", testMountPlannerShouldOpenFinderAfterMountRespectsSetting),
     ("NTFSDiskClassifier NTFS personality", testNTFSDiskClassifierIdentifiesNTFSPersonality),
     ("NTFSDiskClassifier already-mounted filter", testNTFSDiskClassifierIgnoresAlreadyMountedByOurDriver),
-    ("NTFSVolume JSON round trip", testNTFSVolumeRoundTripsThroughJSON)
+    ("NTFSVolume JSON round trip", testNTFSVolumeRoundTripsThroughJSON),
+    ("NTFSMountedVolumesStore add/load/remove", testNTFSMountedVolumesStoreAddLoadRemove),
+    ("NTFSMountedVolumesStore replaces same bsdName", testNTFSMountedVolumesStoreAddReplacesSameBSDName)
 ]
 
 do {
