@@ -2,35 +2,35 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    <key>CFBundleExecutable</key>
-    <string>AutoVolume</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.autovolume.app</string>
-    <key>CFBundleIconFile</key>
-    <string>AutoVolume</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>AutoVolume</string>
-    <key>CFBundleDisplayName</key>
-    <string>AutoVolume</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.47</string>
-    <key>CFBundleVersion</key>
-    <string>47</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>AutoVolume 需要连接你配置的文件服务器，用于测试和恢复网络挂载。</string>
-    <key>NSNetworkVolumesUsageDescription</key>
-    <string>AutoVolume 需要访问网络卷宗，用于显示挂载状态并在网络恢复后重新连接。</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>AutoVolume</string>
+	<key>CFBundleExecutable</key>
+	<string>AutoVolume</string>
+	<key>CFBundleIconFile</key>
+	<string>AutoVolume</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.autovolume.app</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>AutoVolume</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.53</string>
+	<key>CFBundleVersion</key>
+	<string>53</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AutoVolume 需要连接你配置的文件服务器，用于测试和恢复网络挂载。</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>AutoVolume 需要访问网络卷宗，用于显示挂载状态并在网络恢复后重新连接。</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 </dict>
 </plist>

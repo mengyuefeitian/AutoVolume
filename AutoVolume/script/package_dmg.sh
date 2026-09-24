@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/dist/AutoVolume.app"
-VERSION="${1:-0.1.17}"
+VERSION="${1:?Usage: package_dmg.sh <version> (must match Info.plist CFBundleShortVersionString, optionally with a -suffix)}"
 DMG="$ROOT/dist/AutoVolume-$VERSION-local.dmg"
 RW_DMG="$ROOT/dist/AutoVolume-$VERSION-local-rw.dmg"
 STAGING="$ROOT/dist/dmg-staging"
@@ -16,7 +16,24 @@ if [[ ! -d "$APP" ]]; then
   exit 1
 fi
 
-rm -rf "$STAGING" "$MOUNT_POINT" "$RW_DMG" "$DMG"
+# Every build handed to the user must carry a new, never-used version (see CLAUDE.md
+# "HARD RULE"), so a bug can always be traced to exactly one build.
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+if [[ "$VERSION" != "$APP_VERSION" && "$VERSION" != "$APP_VERSION"-* ]]; then
+  echo "error: DMG version '$VERSION' does not match the built app's version '$APP_VERSION'. Bump Resources/Info.plist and rebuild first." >&2
+  exit 1
+fi
+shopt -s nullglob
+existing=("$ROOT/dist/AutoVolume-$APP_VERSION.dmg" "$ROOT"/dist/AutoVolume-"$APP_VERSION"-*.dmg)
+shopt -u nullglob
+for candidate in "${existing[@]}"; do
+  if [[ -e "$candidate" ]]; then
+    echo "error: a DMG for version $APP_VERSION already exists ($candidate). Never reuse or overwrite a version — bump Resources/Info.plist (patch +1, CFBundleVersion +1), rebuild, and package the new version." >&2
+    exit 1
+  fi
+done
+
+rm -rf "$STAGING" "$MOUNT_POINT" "$RW_DMG"
 for mounted_volume in /Volumes/AutoVolume*; do
   if [[ -d "$mounted_volume" ]]; then
     hdiutil detach "$mounted_volume" >/dev/null 2>&1 || true

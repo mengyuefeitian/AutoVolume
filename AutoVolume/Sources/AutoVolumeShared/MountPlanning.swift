@@ -6,7 +6,7 @@ public enum MountPlanningError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidURL:
-            "Invalid remote path. SMB requires a share name, for example sda1 or video."
+            L10n.t(.errorMountInvalidRemotePath)
         }
     }
 }

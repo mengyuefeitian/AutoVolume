@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>AutoVolume Updates</title>
+    <item>
+      <title>Version 0.1.53</title>
+      <pubDate>Thu, 24 Sep 2026 20:37:11 +0800</pubDate>
+      <sparkle:version>53</sparkle:version>
+      <sparkle:shortVersionString>0.1.53</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+<h3>AutoVolume（智卷）0.1.53</h3>
+<ul>
+<li>修复：macOS 14、15 上无法打开、菜单栏图标不见的问题。</li>
+<li>新增：每天自动检查更新，一键安装并重新打开。</li>
+<li>新增：多语言（跟随系统 / 中文 / English / 한국어 / 日本語 / Русский），在 设置 → 通用 → 语言 中切换。</li>
+<li>改进：挂载 WebDAV 更顺畅，挂载时菜单栏图标会显示进度。</li>
+<li>改进：NTFS 移动硬盘读写支持 macOS 14 及以上。</li>
+<li>新增：右键菜单「导出诊断信息…」，方便反馈问题（不含密码）。</li>
+</ul>
+<p>Fixed launching on macOS 14/15 · automatic updates · 6 languages · smoother WebDAV mounting · NTFS read/write on macOS 14+ · Export Diagnostics.</p>
+]]></description>
+      <enclosure
+        url="https://github.com/mengyuefeitian/AutoVolume/releases/download/v0.1.53/AutoVolume-0.1.53.dmg"
+        type="application/octet-stream"
+        sparkle:edSignature="IcLClWWBRQnPDA2/BZ1RUmpRfnl+JZthP/OT1hiLqFzw26iBJX904Fq+mH67T928Euebf+ud8fkBStLCjemMDQ==" length="28228598" />
+    </item>
+    <link>https://mengyuefeitian.github.io/AutoVolume/appcast.xml</link>
+  </channel>
+</rss>

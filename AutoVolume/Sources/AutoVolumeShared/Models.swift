@@ -100,7 +100,7 @@ public enum SMBDialect: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .smb2: "SMB2"
         case .smb2LargeMTU: "SMB2 + Large MTU"
-        case .smb3: "Auto (SMB2-SMB3)"
+        case .smb3: L10n.t(.editorSmbDialectAuto)
         }
     }
 
@@ -118,7 +118,12 @@ public enum VolumeStatus: Codable, Equatable {
     case mounted
     case unmounted
     case checking
-    case failed(message: String)
+    /// `key`/`args` carry the `L10nKey.rawValue` and substitution args for failures that came
+    /// from a fixed, keyed sentence (`String`, not `L10nKey`, so this stays trivially
+    /// `Codable`). Both default so existing `.failed(message:)` call sites compile unchanged;
+    /// `key == nil` for failures built from raw command/error output, which has no key to
+    /// localize.
+    case failed(message: String, key: String? = nil, args: [String] = [])
 }
 
 public enum MountErrorCategory: String, Codable, Equatable {
