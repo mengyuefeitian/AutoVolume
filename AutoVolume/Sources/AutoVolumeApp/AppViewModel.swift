@@ -1,160 +1,7 @@
 import Foundation
 import Observation
+import Darwin
 import AutoVolumeShared
-
-public enum AppLanguage: String, CaseIterable, Identifiable {
-    case english
-    case chinese
-
-    public var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .english: "English"
-        case .chinese: "中文"
-        }
-    }
-}
-
-struct AppStrings {
-    let productName: String
-    let emptyTitle: String
-    let emptyDescription: String
-    let add: String
-    let edit: String
-    let remove: String
-    let mount: String
-    let unmount: String
-    let test: String
-    let saveAndMount: String
-    let save: String
-    let cancel: String
-    let name: String
-    let server: String
-    let remotePath: String
-    let remotePathHelp: String
-    let username: String
-    let password: String
-    let protocolLabel: String
-    let mountPoint: String
-    let checkInterval: String
-    let everyMinutes: (Int) -> String
-    let testSucceeded: String
-    let mountSucceeded: String
-    let saved: String
-    let confirmRemove: String
-    let language: String
-    let showPassword: String
-    let hidePassword: String
-    let testReachabilitySucceeded: String
-    let smbDialect: String
-    let smbMultichannel: String
-    let smbAsyncReads: String
-    let working: String
-    let testing: String
-    let mounting: String
-    let unmounting: String
-    let unmountSucceeded: String
-    let alerts: String
-    let clearAlerts: String
-    let noAlerts: String
-    let ntfsReadWriteBadge: String
-
-    static func values(for language: AppLanguage) -> AppStrings {
-        switch language {
-        case .english:
-            AppStrings(
-                productName: "AutoVolume",
-                emptyTitle: "No Volumes",
-                emptyDescription: "Add a network volume to keep it connected.",
-                add: "Add",
-                edit: "Edit",
-                remove: "Remove",
-                mount: "Mount",
-                unmount: "Unmount",
-                test: "Test Reachability",
-                saveAndMount: "Save & Mount",
-                save: "Save",
-                cancel: "Cancel",
-                name: "Name",
-                server: "Server",
-                remotePath: "Remote Path",
-                remotePathHelp: "Use / for WebDAV root. For SMB, use share or share/folder, for example video or media/2026. Use /, not \\.",
-                username: "Username",
-                password: "Password",
-                protocolLabel: "Protocol",
-                mountPoint: "Mount Point",
-                checkInterval: "Check Interval",
-                everyMinutes: { "Every \($0) minutes" },
-                testSucceeded: "Connection, credentials, and remote path verified.",
-                mountSucceeded: "Mount command succeeded.",
-                saved: "Saved.",
-                confirmRemove: "Remove this volume?",
-                language: "Language",
-                showPassword: "Show password",
-                hidePassword: "Hide password",
-                testReachabilitySucceeded: "Connection, credentials, and remote path verified.",
-                smbDialect: "SMB Range",
-                smbMultichannel: "SMB3 Multichannel",
-                smbAsyncReads: "Async directory reads",
-                working: "Working...",
-                testing: "Testing...",
-                mounting: "Mounting...",
-                unmounting: "Unmounting...",
-                unmountSucceeded: "Unmounted.",
-                alerts: "Alerts",
-                clearAlerts: "Clear",
-                noAlerts: "No alerts",
-                ntfsReadWriteBadge: "NTFS (Read-Write)"
-            )
-        case .chinese:
-            AppStrings(
-                productName: "智卷",
-                emptyTitle: "暂无卷",
-                emptyDescription: "添加网络卷后，智卷会保持它在线。",
-                add: "添加",
-                edit: "编辑",
-                remove: "移除",
-                mount: "挂载",
-                unmount: "卸载",
-                test: "测试连通性",
-                saveAndMount: "保存并挂载",
-                save: "保存",
-                cancel: "取消",
-                name: "名称",
-                server: "服务器",
-                remotePath: "远程路径",
-                remotePathHelp: "WebDAV 根目录填 /。SMB 填共享名或共享名/文件夹，例如 video 或 media/2026。请使用 /，不要使用 \\。",
-                username: "用户名",
-                password: "密码",
-                protocolLabel: "协议",
-                mountPoint: "挂载点",
-                checkInterval: "检查间隔",
-                everyMinutes: { "每 \($0) 分钟" },
-                testSucceeded: "服务器、账号密码和远程路径验证通过。",
-                mountSucceeded: "挂载命令执行成功。",
-                saved: "已保存。",
-                confirmRemove: "移除此网络卷？",
-                language: "语言",
-                showPassword: "显示密码",
-                hidePassword: "隐藏密码",
-                testReachabilitySucceeded: "服务器、账号密码和远程路径验证通过。",
-                smbDialect: "SMB 范围",
-                smbMultichannel: "SMB3 多通道",
-                smbAsyncReads: "异步目录读取",
-                working: "处理中...",
-                testing: "测试中...",
-                mounting: "挂载中...",
-                unmounting: "卸载中...",
-                unmountSucceeded: "已卸载。",
-                alerts: "告警",
-                clearAlerts: "清空",
-                noAlerts: "暂无告警",
-                ntfsReadWriteBadge: "NTFS（读写）"
-            )
-        }
-    }
-}
 
 @Observable
 public final class AppViewModel {
@@ -166,9 +13,39 @@ public final class AppViewModel {
     public var editorVolume: VolumeConfig?
     public var editorSessionID = UUID()
     public private(set) var settings: AppSettings
+
+    /// Bumped whenever `.autoVolumeLanguageChanged` fires. `@Observable` only tracks stored
+    /// properties it sees read during a view's `body` evaluation, and `L10n.resolved` is a
+    /// plain global, not a stored property of this class — reading it alone would never
+    /// register as a SwiftUI dependency. Views read this property once in `body` (for example
+    /// `let _ = viewModel.languageRevision`) purely to register the dependency; every other
+    /// `L10n.t(...)` call in that `body` then re-resolves under the new language once SwiftUI
+    /// re-evaluates the whole view.
+    public private(set) var languageRevision = 0
+    private var languageChangeObserver: NSObjectProtocol?
+
+    /// The active language, backed by `settings.language`. The setter persists the change
+    /// through `updateSettings` and propagates it to the shared `L10n` lookup (which drives
+    /// this app's UI, the agent, and — via `Bundle.activateLanguageOverride()` — Sparkle's own
+    /// alerts) so every consumer stays in sync with a single source of truth.
     public var language: AppLanguage {
-        didSet {
-            UserDefaults.standard.set(language.rawValue, forKey: Self.languageDefaultsKey)
+        get { settings.language }
+        set {
+            guard newValue != settings.language else { return }
+            let previousLanguage = settings.language
+            // Flip `L10n` to the new language BEFORE persisting so that any SwiftUI
+            // invalidation triggered by `updateSettings` (via `settings` changing) already
+            // sees the new language when views next call `L10n.t(...)`. If the save then
+            // fails, `settings` was never touched — revert `L10n` to match, so the app doesn't
+            // end up displaying a language it didn't actually persist.
+            L10n.setLanguage(newValue)
+            var updatedSettings = settings
+            updatedSettings.language = newValue
+            let saved = updateSettings(updatedSettings)
+            if !saved {
+                L10n.setLanguage(previousLanguage)
+                AutoVolumeLogger.shared.error("Language change to \(newValue.rawValue) could not be persisted; reverted to \(previousLanguage.rawValue)")
+            }
         }
     }
 
@@ -183,8 +60,6 @@ public final class AppViewModel {
     private let mountExposure: MountExposure
     private let settingsStore: AppSettingsStore
     private let ntfsMountedVolumesStore = NTFSMountedVolumesStore()
-
-    private static let languageDefaultsKey = "AutoVolume.language"
 
     public init(
         configStore: ConfigStore = JSONConfigStore(),
@@ -211,21 +86,30 @@ public final class AppViewModel {
         self.volumes = (try? configStore.load()) ?? []
         self.alerts = (try? alertStore.load()) ?? []
         self.settings = (try? settingsStore.load()) ?? AppSettings()
-        if let rawLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey),
-           let savedLanguage = AppLanguage(rawValue: rawLanguage) {
-            self.language = savedLanguage
-        } else if Locale.autoupdatingCurrent.language.languageCode?.identifier == "zh" {
-            self.language = .chinese
-        } else {
-            self.language = .english
-        }
         migrateLegacyMountPoints()
-        refreshVolumeStatuses()
+        // Do not call the synchronous `refreshVolumeStatuses()` here: it probes every
+        // configured volume's mount health (up to ~3s per volume, unbounded against a hung
+        // WebDAV mount) and would block app launch on the main thread before the stall
+        // watchdog even starts. Leave `volumeStatuses` empty at launch and populate it
+        // asynchronously instead.
+        Task { [weak self] in
+            await self?.refreshVolumeStatusesAsync()
+        }
         refreshNTFSVolumes()
+        languageChangeObserver = NotificationCenter.default.addObserver(
+            forName: .autoVolumeLanguageChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.languageRevision += 1
+        }
     }
 
-    var strings: AppStrings { AppStrings.values(for: language) }
-    var productName: String { strings.productName }
+    deinit {
+        if let languageChangeObserver {
+            NotificationCenter.default.removeObserver(languageChangeObserver)
+        }
+    }
 
     public func beginAddingVolume() {
         editorVolume = nil
@@ -251,7 +135,7 @@ public final class AppViewModel {
         if config.protocolType == .smb {
             try smbPreferencesWriter.apply(options: config.smbOptions)
         }
-        refreshVolumeStatuses()
+        scheduleVolumeStatusRefresh()
     }
 
     public func save(_ config: VolumeConfig, password: String?) throws {
@@ -264,7 +148,18 @@ public final class AppViewModel {
         if let password, !password.isEmpty {
             try credentialStore.savePassword(password, for: config.id)
         }
-        refreshVolumeStatuses()
+        scheduleVolumeStatusRefresh()
+    }
+
+    /// Kicks off `refreshVolumeStatusesAsync()` without blocking the caller. `add`/`save` are
+    /// synchronous, main-thread APIs (called directly from UI actions), but the refresh itself
+    /// probes every volume's mount health — up to ~3s per volume — so it must never run inline
+    /// on main. `@MainActor` on `refreshVolumeStatusesAsync()` means the snapshot of `volumes`
+    /// it takes still reflects the state just persisted above.
+    private func scheduleVolumeStatusRefresh() {
+        Task { [weak self] in
+            await self?.refreshVolumeStatusesAsync()
+        }
     }
 
     public func delete(_ config: VolumeConfig) throws {
@@ -272,16 +167,32 @@ public final class AppViewModel {
         try persist()
         try credentialStore.deletePassword(for: config.id)
         try? alertStore.resolve(volumeID: config.id)
-        refreshAlerts()
     }
 
-    public func updateSettings(_ newSettings: AppSettings) {
+    /// Deletes the volume, then refreshes alerts/statuses off-main. `delete(_:)` itself is
+    /// cheap (JSON + keychain writes), but the follow-up status refresh probes every
+    /// remaining volume's mount health (subprocess calls with multi-second timeouts) and
+    /// must never run on the main thread — see `refreshVolumeStatusesAsync()`.
+    @MainActor
+    public func deleteAsync(_ config: VolumeConfig) async throws {
+        try delete(config)
+        await refreshVolumeStatusesAsync()
+    }
+
+    /// Persists `newSettings` and, only on success, applies it to `settings`. Returns whether
+    /// the save succeeded so callers that layer additional state on top of a settings change
+    /// (notably the `language` setter, which also flips the global `L10n` language) can revert
+    /// that additional state instead of leaving the app out of sync with what's on disk.
+    @discardableResult
+    public func updateSettings(_ newSettings: AppSettings) -> Bool {
         do {
             try settingsStore.save(newSettings)
             settings = newSettings
             AutoVolumeLogger.shared.info("Settings updated: logLevel=\(newSettings.logLevel), openFinderAfterMount=\(newSettings.openFinderAfterMount)")
+            return true
         } catch {
             AutoVolumeLogger.shared.error("Settings save failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -301,10 +212,26 @@ public final class AppViewModel {
 
     public func clearAlerts() {
         try? alertStore.clear()
-        refreshAlerts()
+        alerts = []
     }
 
-    public func refreshVolumeStatuses() {
+    /// Clears the alert store (cheap), then recomputes volume statuses off-main. `clearAlerts()`
+    /// was previously invoked directly from a `Menu` `Button` on the main thread and, via
+    /// `refreshAlerts()` → `refreshVolumeStatuses()`, ran the full `PathHealthProbe` loop
+    /// (~3s per volume against a hung mount) synchronously on main — this is the async
+    /// replacement, matching the `deleteAsync`/`refreshVolumeStatusesAsync` pattern.
+    @MainActor
+    public func clearAlertsAsync() async {
+        clearAlerts()
+        await refreshVolumeStatusesAsync()
+    }
+
+    /// Pure computation over the given snapshot — no access to `self`, safe to run off-main.
+    public static func computeVolumeStatuses(
+        volumes: [VolumeConfig],
+        alerts: [VolumeAlert],
+        mountStateProvider: MountStateProvider
+    ) -> [VolumeConfig.ID: VolumeStatus] {
         var statuses: [VolumeConfig.ID: VolumeStatus] = [:]
         for volume in volumes {
             if mountStateProvider.isMounted(config: volume) {
@@ -315,24 +242,54 @@ public final class AppViewModel {
                 statuses[volume.id] = .unmounted
             }
         }
-        volumeStatuses = statuses
+        return statuses
+    }
+
+    /// Synchronous variant for callers already confirmed to be on the main thread outside a
+    /// mount/unmount flow (init, add, save, clearAlerts). Each call to `isMounted` can spawn a
+    /// subprocess with a multi-second timeout, so this must never be called from a background
+    /// thread or from inside mount/unmount — use `refreshVolumeStatusesAsync()` there instead.
+    public func refreshVolumeStatuses() {
+        volumeStatuses = Self.computeVolumeStatuses(volumes: volumes, alerts: alerts, mountStateProvider: mountStateProvider)
+    }
+
+    /// Reloads alerts and recomputes volume statuses off the calling thread, then assigns both
+    /// observable properties back on the `MainActor`. Safe to call from any context — mount/
+    /// unmount (running on a detached background task) and UI-driven flows (already on the
+    /// main actor) both need the actual probing to happen off-main. `@MainActor` guarantees
+    /// `volumes` is read on main before being handed to the detached probe, and — since this
+    /// function is itself main-actor-isolated — execution automatically resumes on main after
+    /// `await`ing the detached task, so no explicit `MainActor.run` hop is needed to assign the
+    /// results back.
+    @MainActor
+    public func refreshVolumeStatusesAsync() async {
+        let volumesSnapshot = volumes
+        let provider = mountStateProvider
+        let alertStore = alertStore
+        let (loadedAlerts, statuses) = await Task.detached {
+            let loadedAlerts = (try? alertStore.load()) ?? []
+            let statuses = Self.computeVolumeStatuses(volumes: volumesSnapshot, alerts: loadedAlerts, mountStateProvider: provider)
+            return (loadedAlerts, statuses)
+        }.value
+        self.alerts = loadedAlerts
+        self.volumeStatuses = statuses
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {
         AutoVolumeLogger.shared.info("Testing connection for \(config.name) \(config.protocolType.rawValue)")
         if config.protocolType == .webdav {
-            try verifyConnectivity(for: config, password: password, action: "Connection test")
+            try verifyConnectivity(for: config, password: password, fallbackKey: .errorCommandConnectionTestFailed)
             AutoVolumeLogger.shared.info("Connection test passed for \(config.name)")
-            return strings.testSucceeded
+            return L10n.t(.statusTestSucceeded)
         }
 
         let result = try runTemporaryMountTest(for: config, password: password)
         guard result.exitCode == 0 else {
-            AutoVolumeLogger.shared.warning("Connection test failed for \(config.name): \(commandFailureMessage(result, action: "Connection test"))")
-            throw AppViewModelError.commandFailed(commandFailureMessage(result, action: "Connection test"))
+            AutoVolumeLogger.shared.warning("Connection test failed for \(config.name): \(commandFailureMessage(result, fallbackKey: .errorCommandConnectionTestFailed))")
+            throw AppViewModelError.commandFailed(commandFailureMessage(result, fallbackKey: .errorCommandConnectionTestFailed))
         }
         AutoVolumeLogger.shared.info("Connection test passed for \(config.name)")
-        return strings.testSucceeded
+        return L10n.t(.statusTestSucceeded)
     }
 
     public func testConnectionAsync(_ config: VolumeConfig, password: String?) async throws -> String {
@@ -341,27 +298,37 @@ public final class AppViewModel {
         }.value
     }
 
-    public func mount(_ config: VolumeConfig, password: String? = nil) throws -> String {
+    public func mount(_ config: VolumeConfig, password: String? = nil) async throws -> String {
         AutoVolumeLogger.shared.info("Mount requested for \(config.name) \(config.protocolType.rawValue)")
-        let storedPassword = try password ?? credentialStore.password(for: config.id)
-        if config.protocolType == .smb {
-            try smbPreferencesWriter.apply(options: config.smbOptions)
-        }
-        try runMountCommand(for: config, password: storedPassword)
-        if mountPlanner.shouldOpenFinderAfterMount(for: config) {
-            let openResult = try openMountedVolume(config)
-            if openResult.exitCode != 0 {
-                AutoVolumeLogger.shared.warning("Finder open failed for \(config.name): \(commandFailureMessage(openResult, action: "Finder"))")
-                throw AppViewModelError.commandFailed(finderOpenFailureMessage(openResult))
+        let operationName = "\(config.protocolType.rawValue)-mount \(config.name)"
+        DiagnosticsContext.shared.begin(operationName)
+        defer { DiagnosticsContext.shared.end() }
+        let timer = PhaseTimer(operation: operationName)
+        do {
+            let storedPassword = try password ?? credentialStore.password(for: config.id)
+            if config.protocolType == .smb {
+                try smbPreferencesWriter.apply(options: config.smbOptions)
             }
+            try await runMountCommand(for: config, password: storedPassword, timer: timer)
+            if mountPlanner.shouldOpenFinderAfterMount(for: config) {
+                let openResult = try openMountedVolume(config, timer: timer)
+                if openResult.exitCode != 0 {
+                    AutoVolumeLogger.shared.warning("Finder open failed for \(config.name): \(commandFailureMessage(openResult, fallbackKey: .errorCommandFinderFailed))")
+                    throw AppViewModelError.commandFailed(finderOpenFailureMessage(openResult))
+                }
+            }
+            AutoVolumeLogger.shared.info("Mount succeeded for \(config.name)")
+            timer.finish(result: "success")
+            return L10n.t(.statusMountSucceeded)
+        } catch {
+            timer.finish(result: "failed: \(error.localizedDescription)")
+            throw error
         }
-        AutoVolumeLogger.shared.info("Mount succeeded for \(config.name)")
-        return strings.mountSucceeded
     }
 
     public func mountAsync(_ config: VolumeConfig, password: String? = nil) async throws -> String {
         try await Task.detached {
-            try self.mount(config, password: password)
+            try await self.mount(config, password: password)
         }.value
     }
 
@@ -369,27 +336,30 @@ public final class AppViewModel {
         try save(config, password: password)
     }
 
-    public func unmount(_ config: VolumeConfig) throws {
+    public func unmount(_ config: VolumeConfig) async throws {
         AutoVolumeLogger.shared.info("Unmount requested for \(config.name)")
+        let operationName = "\(config.protocolType.rawValue)-unmount \(config.name)"
+        DiagnosticsContext.shared.begin(operationName)
+        defer { DiagnosticsContext.shared.end() }
         let mountPoint = mountPlanner.unmountTarget(for: config)
         let result = try commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         guard result.exitCode == 0 else {
             let forceResult = try commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
             if forceResult.exitCode != 0 {
-                AutoVolumeLogger.shared.warning("Unmount failed for \(config.name): \(commandFailureMessage(forceResult, action: "Unmount"))")
-                throw AppViewModelError.commandFailed(commandFailureMessage(forceResult, action: "Unmount"))
+                AutoVolumeLogger.shared.warning("Unmount failed for \(config.name): \(commandFailureMessage(forceResult, fallbackKey: .errorCommandUnmountFailed))")
+                throw AppViewModelError.commandFailed(commandFailureMessage(forceResult, fallbackKey: .errorCommandUnmountFailed))
             }
-            refreshVolumeStatuses()
+            await refreshVolumeStatusesAsync()
             AutoVolumeLogger.shared.info("Force unmount succeeded for \(config.name)")
             return
         }
-        refreshVolumeStatuses()
+        await refreshVolumeStatusesAsync()
         AutoVolumeLogger.shared.info("Unmount succeeded for \(config.name)")
     }
 
     public func unmountAsync(_ config: VolumeConfig) async throws {
         try await Task.detached {
-            try self.unmount(config)
+            try await self.unmount(config)
         }.value
     }
 
@@ -428,59 +398,156 @@ public final class AppViewModel {
             .path
     }
 
-    private func runMountCommand(for config: VolumeConfig, password: String?) throws {
+    private func runMountCommand(for config: VolumeConfig, password: String?, timer: PhaseTimer) async throws {
         if config.protocolType == .webdav {
-            try verifyConnectivity(for: config, password: password, action: "Mount")
+            try verifyConnectivity(for: config, password: password, fallbackKey: .errorCommandMountFailed)
         }
+        timer.mark("connectivity")
         try mountExposure.prepare(config: config, planner: mountPlanner)
-        let result = try runMountWithRecovery(for: config, password: password)
+        timer.mark("prepare")
+        let result = try runMountWithRecovery(for: config, password: password, timer: timer)
         guard result.exitCode == 0 else {
             throw AppViewModelError.commandFailed(mountFailureMessage(for: config, result: result))
         }
+        // `expose()` only (re)creates a local symlink at the visible mount point; it does not
+        // change the health-check target (`MountPlanner.healthCheckPath` already resolves the
+        // SMB subpath before this runs), so re-probing responsiveness here would just repeat
+        // the check `runMountWithRecovery` already performed via `waitForMountedVolumeResponse`.
         try mountExposure.expose(config: config, planner: mountPlanner)
-        guard waitForMountedVolumeResponse(config) else {
-            throw AppViewModelError.commandFailed("Mount command succeeded, but the mounted volume did not respond.")
-        }
+        timer.mark("expose")
         try? alertStore.resolve(volumeID: config.id)
-        refreshAlerts()
+        await refreshVolumeStatusesAsync()
+        timer.mark("refresh")
     }
 
-    private func verifyConnectivity(for config: VolumeConfig, password: String?, action: String) throws {
+    private func verifyConnectivity(for config: VolumeConfig, password: String?, fallbackKey: L10nKey) throws {
         let plan = try connectivityTester.testPlan(for: config, password: password)
         let result = try commandRunner.run(plan).redacting(secrets: [password])
         let connectivity = connectivityTester.checkResult(for: config, result: result)
         guard connectivity.isReachable else {
-            throw AppViewModelError.commandFailed(connectivity.message ?? commandFailureMessage(result, action: action))
+            let localizedMessage = connectivity.messageKey.map { L10n.t($0, args: connectivity.messageArgs) }
+                ?? connectivity.message
+                ?? commandFailureMessage(result, fallbackKey: fallbackKey)
+            throw AppViewModelError.commandFailed(localizedMessage)
         }
     }
 
-    private func openMountedVolume(_ config: VolumeConfig) throws -> CommandResult {
+    private func openMountedVolume(_ config: VolumeConfig, timer: PhaseTimer) throws -> CommandResult {
         let browsePath = mountPlanner.resolvedBrowsePath(for: config)
         Thread.sleep(forTimeInterval: 0.6)
         guard PathHealthProbe(timeout: 3).isResponsive(path: browsePath) else {
-            return CommandResult(exitCode: 1, stdout: "", stderr: "Mounted folder is not responding at \(browsePath).")
+            return CommandResult(exitCode: 1, stdout: "", stderr: L10n.t(.errorFinderNotResponding, browsePath))
         }
         cleanupFinderWindows(for: config, resolvedBrowsePath: browsePath)
-        return try commandRunner.run(mountPlanner.finderRevealPlan(for: config, resolvedBrowsePath: browsePath))
+        timer.mark("finder-cleanup")
+        let result = try commandRunner.run(mountPlanner.finderRevealPlan(for: config, resolvedBrowsePath: browsePath))
+        timer.mark("finder-open")
+        return result
     }
 
     private func cleanupFinderWindows(for config: VolumeConfig, resolvedBrowsePath: String) {
         let paths = mountPlanner.finderCleanupPaths(for: config, resolvedBrowsePath: resolvedBrowsePath)
         guard !paths.isEmpty else { return }
+        // Finder can be slow or unresponsive (this is the exact class of stall this task
+        // fixes), so skip the full cleanup script entirely unless a Finder window is actually
+        // targeting one of our paths, and bound every osascript call with a wall-clock kill —
+        // `CommandRunner` has no timeout of its own, so this bypasses it and spawns the
+        // process directly, reusing PathHealthProbe's timeout+kill pattern.
+        guard finderHasWindowTargeting(paths) else { return }
+        let script = """
+        with timeout of 3 seconds
+            tell application "Finder"
+                repeat with windowPath in {\(paths.map { "\"\(Self.appleScriptEscaped($0))\"" }.joined(separator: ", "))}
+                    repeat with finderWindow in windows
+                        try
+                            if POSIX path of (target of finderWindow as alias) is (windowPath as text) then
+                                close finderWindow
+                            end if
+                        end try
+                    end repeat
+                end repeat
+            end tell
+        end timeout
+        """
+        _ = runAppleScriptWithTimeout(script, timeout: 5)
+    }
+
+    private func finderHasWindowTargeting(_ paths: [String]) -> Bool {
+        // `POSIX path of (target of every Finder window as alias list)` raises -1728 as soon as
+        // any single window's target can't coerce to an alias (e.g. Recents) or there are 2+
+        // windows open, and the outer `try` swallows that for the *whole* list — so cleanup was
+        // always skipped whenever it mattered. Loop per window instead, with its own `try`, so
+        // one bad window doesn't blank out every other window's path.
         let script = """
         tell application "Finder"
-            repeat with windowPath in {\(paths.map { "\"\(Self.appleScriptEscaped($0))\"" }.joined(separator: ", "))}
-                repeat with finderWindow in windows
+            with timeout of 3 seconds
+                set out to ""
+                repeat with w in every Finder window
                     try
-                        if POSIX path of (target of finderWindow as alias) is (windowPath as text) then
-                            close finderWindow
-                        end if
+                        set out to out & POSIX path of (target of w as alias) & linefeed
                     end try
                 end repeat
-            end repeat
+                return out
+            end timeout
         end tell
         """
-        _ = try? commandRunner.run(CommandPlan(executable: "/usr/bin/osascript", arguments: ["-"], standardInput: script))
+        guard let result = runAppleScriptWithTimeout(script, timeout: 5), result.exitCode == 0 else {
+            // If the fast probe itself fails or times out, skip the full cleanup rather than
+            // risk running it against a Finder that is already unresponsive.
+            return false
+        }
+        // Finder returns directory paths with a trailing "/"; tolerate that difference against
+        // our candidate paths, which don't carry one.
+        let windowPaths = result.stdout
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.hasSuffix("/") ? String($0.dropLast()) : String($0) }
+        return paths.contains { candidate in
+            windowPaths.contains { $0 == candidate }
+        }
+    }
+
+    /// Runs an AppleScript via osascript with a hard wall-clock timeout, bypassing the
+    /// injected `commandRunner` (which has no timeout support). Mirrors `PathHealthProbe`'s
+    /// wait-with-timeout-then-kill pattern in MountState.swift.
+    private func runAppleScriptWithTimeout(_ script: String, timeout: TimeInterval) -> CommandResult? {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        let stdin = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-"]
+        process.standardOutput = stdout
+        process.standardError = stderr
+        process.standardInput = stdin
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        stdin.fileHandleForWriting.write(Data(script.utf8))
+        try? stdin.fileHandleForWriting.close()
+
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            group.leave()
+        }
+
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.2)
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            return nil
+        }
+        return CommandResult(
+            exitCode: process.terminationStatus,
+            stdout: String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
+            stderr: String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        )
     }
 
     private func runTemporaryMountTest(for config: VolumeConfig, password: String?) throws -> CommandResult {
@@ -508,31 +575,45 @@ public final class AppViewModel {
         }
 
         try mountExposure.prepare(config: testConfig, planner: mountPlanner)
-        let result = try runMountWithRecovery(for: testConfig, password: password)
+        let timer = PhaseTimer(operation: "\(testConfig.protocolType.rawValue)-test \(testConfig.name)")
+        let result = try runMountWithRecovery(for: testConfig, password: password, timer: timer)
         guard result.exitCode == 0 else { return result }
         try mountExposure.expose(config: testConfig, planner: mountPlanner)
         let probePath = mountPlanner.exposedPathTarget(for: testConfig) ?? mountPlanner.effectiveMountPoint(for: testConfig)
         guard PathHealthProbe(timeout: 5).isResponsive(path: probePath) else {
-            return CommandResult(exitCode: 1, stdout: "", stderr: "Mounted volume did not respond at the configured remote path.")
+            return CommandResult(exitCode: 1, stdout: "", stderr: L10n.t(.errorMountVolumeNotRespondingAtRemotePath))
         }
         return result
     }
 
-    private func runMountWithRecovery(for config: VolumeConfig, password: String?) throws -> CommandResult {
+    private func runMountWithRecovery(for config: VolumeConfig, password: String?, timer: PhaseTimer) throws -> CommandResult {
         let plan = try mountPlanner.mountPlan(for: config, password: password, suppressesUserInterface: true)
         let result = try commandRunner.run(plan).redacting(secrets: [password])
+        timer.mark("mount-command")
+        logMountCommandResult(result, config: config)
         if result.exitCode == 0 {
-            guard !mountedVolumeIsStale(config) else {
+            // `mark` logs elapsed time since the *previous* mark, so it must be called
+            // after the phase it names has actually run — not before, which would fold
+            // the phase's own duration into whatever comes next instead.
+            let isStale = mountedVolumeIsStale(config)
+            timer.mark("stale-check")
+            guard !isStale else {
                 unmountStaleTarget(for: config)
                 let retryResult = try commandRunner.run(plan).redacting(secrets: [password])
+                timer.mark("mount-command")
+                logMountCommandResult(retryResult, config: config)
                 guard retryResult.exitCode == 0 else { return retryResult }
-                return waitForMountedVolumeResponse(config)
+                let responded = waitForMountedVolumeResponse(config)
+                timer.mark("response-wait")
+                return responded
                     ? retryResult
-                    : CommandResult(exitCode: 1, stdout: retryResult.stdout, stderr: "Mount command succeeded, but the mounted volume did not respond after clearing a stale mount.")
+                    : CommandResult(exitCode: 1, stdout: retryResult.stdout, stderr: L10n.t(.errorMountVolumeNotRespondingAfterStaleClear))
             }
-            return waitForMountedVolumeResponse(config)
+            let responded = waitForMountedVolumeResponse(config)
+            timer.mark("response-wait")
+            return responded
                 ? result
-                : CommandResult(exitCode: 1, stdout: result.stdout, stderr: "Mount command succeeded, but the mounted volume did not respond.")
+                : CommandResult(exitCode: 1, stdout: result.stdout, stderr: L10n.t(.errorMountVolumeNotResponding))
         }
 
         guard isOccupiedMountPointError(result) else {
@@ -541,10 +622,21 @@ public final class AppViewModel {
 
         unmountStaleTarget(for: config)
         let retryResult = try commandRunner.run(plan).redacting(secrets: [password])
+        timer.mark("mount-command")
+        logMountCommandResult(retryResult, config: config)
         guard retryResult.exitCode == 0 else { return retryResult }
-        return waitForMountedVolumeResponse(config)
+        let responded = waitForMountedVolumeResponse(config)
+        timer.mark("response-wait")
+        return responded
             ? retryResult
-            : CommandResult(exitCode: 1, stdout: retryResult.stdout, stderr: "Mount command succeeded, but the mounted volume did not respond after clearing an occupied mount point.")
+            : CommandResult(exitCode: 1, stdout: retryResult.stdout, stderr: L10n.t(.errorMountVolumeNotRespondingAfterOccupiedClear))
+    }
+
+    /// Logs the osascript mount command's exit code and redacted stderr for every attempt,
+    /// including successful ones — needed to diagnose a stall that happens *after* the
+    /// mount command itself already returned.
+    private func logMountCommandResult(_ result: CommandResult, config: VolumeConfig) {
+        AutoVolumeLogger.shared.info("\(config.protocolType.rawValue)-mount \(config.name) osascript exitCode=\(result.exitCode) stderr=\(CommandResult.redacted(result.stderr))")
     }
 
     private func waitForMountedVolumeResponse(_ config: VolumeConfig) -> Bool {
@@ -578,10 +670,14 @@ public final class AppViewModel {
         return message.contains("file exists") || message.contains("resource busy") || message.contains("already mounted")
     }
 
-    private func commandFailureMessage(_ result: CommandResult, action: String) -> String {
+    /// `detail` is either real subprocess stderr/stdout (untranslated, per design) or a string
+    /// this app already synthesized via `L10n.t(...)` at its construction site (for example the
+    /// "volume did not respond" messages below) — either way it is passed through verbatim.
+    /// Only the generic fallback, when there's no detail at all, is localized here.
+    private func commandFailureMessage(_ result: CommandResult, fallbackKey: L10nKey) -> String {
         let detail = result.stderr.isEmpty ? result.stdout : result.stderr
         if detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "\(action) failed with exit code \(result.exitCode)."
+            return L10n.t(fallbackKey, String(result.exitCode))
         }
         return detail
     }
@@ -589,27 +685,17 @@ public final class AppViewModel {
     private func mountFailureMessage(for config: VolumeConfig, result: CommandResult) -> String {
         let detail = result.stderr.isEmpty ? result.stdout : result.stderr
         if config.protocolType == .webdav, detail.contains("-5014") {
-            switch language {
-            case .chinese:
-                return "macOS WebDAV/Finder 挂载服务返回 -5014。AutoVolume 已验证到这是系统挂载层异常，不是账号密码错误；请先退出 AutoVolume 并重启 macOS，重启后通常会立即恢复。"
-            case .english:
-                return "macOS WebDAV/Finder mount service returned -5014. This is a macOS mount-layer failure, not a credential error; quit AutoVolume and restart macOS, which usually clears it."
-            }
+            return L10n.t(.errorMountWebdavFinder5014)
         }
         if config.protocolType == .webdav, result.exitCode == 22 {
-            return "WebDAV connectivity passed, but macOS Finder mount failed with exit code 22."
+            return L10n.t(.errorMountWebdavExit22)
         }
-        return commandFailureMessage(result, action: "Mount")
+        return commandFailureMessage(result, fallbackKey: .errorCommandMountFailed)
     }
 
     private func finderOpenFailureMessage(_ result: CommandResult) -> String {
-        let detail = commandFailureMessage(result, action: "Finder")
-        switch language {
-        case .chinese:
-            return "挂载后 Finder 无法打开目标目录：\(detail)"
-        case .english:
-            return "Mounted, but Finder could not open the target folder: \(detail)"
-        }
+        let detail = commandFailureMessage(result, fallbackKey: .errorCommandFinderFailed)
+        return L10n.t(.errorFinderOpenFailed, detail)
     }
 
     private static func appleScriptEscaped(_ value: String) -> String {
@@ -626,7 +712,7 @@ enum AppViewModelError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .commandFailed(let message):
-            message.isEmpty ? "Command failed." : message
+            message.isEmpty ? L10n.t(.errorCommandGenericFailed) : message
         }
     }
 }

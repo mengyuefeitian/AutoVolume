@@ -2,11 +2,18 @@ import Foundation
 
 public struct ConnectivityCheckResult: Equatable {
     public var isReachable: Bool
+    /// English rendering, for logs and callers that don't localize (e.g. `AutoVolumeLogger`).
     public var message: String?
+    /// The key this failure was recorded under, if it came from a fixed hardcoded sentence.
+    /// `nil` for the raw-command-output fallback, where there is no sentence to key.
+    public var messageKey: L10nKey?
+    public var messageArgs: [String]
 
-    public init(isReachable: Bool, message: String? = nil) {
+    public init(isReachable: Bool, message: String? = nil, messageKey: L10nKey? = nil, messageArgs: [String] = []) {
         self.isReachable = isReachable
         self.message = message
+        self.messageKey = messageKey
+        self.messageArgs = messageArgs
     }
 }
 
@@ -48,61 +55,48 @@ public struct ConnectivityTester {
 
         if config.protocolType == .webdav {
             if normalized.contains("401") || normalized.contains("unauthorized") {
-                return ConnectivityCheckResult(
-                    isReachable: false,
-                    message: "WebDAV authentication failed (401 Unauthorized). Check the username, password, and account permission for this remote path."
-                )
+                return failure(.errorConnectivityWebDAVUnauthorized)
             }
             if normalized.contains("403") || normalized.contains("forbidden") {
-                return ConnectivityCheckResult(
-                    isReachable: false,
-                    message: "WebDAV access was denied (403 Forbidden). Check whether this account can access the configured remote path."
-                )
+                return failure(.errorConnectivityWebDAVForbidden)
             }
             if normalized.contains("404") || normalized.contains("not found") {
-                return ConnectivityCheckResult(
-                    isReachable: false,
-                    message: "WebDAV remote path was not found. Check the remote path format and folder name."
-                )
+                return failure(.errorConnectivityWebDAVNotFound)
             }
         }
 
         if result.exitCode == 124 || isNetworkFailureMessage(normalized) {
-            return ConnectivityCheckResult(
-                isReachable: false,
-                message: "\(displayName(for: config.protocolType)) server is not reachable now. AutoVolume will retry after the network returns."
-            )
+            return failure(.errorConnectivityUnreachable, args: [displayName(for: config.protocolType)])
         }
 
         switch config.protocolType {
         case .smb:
-            return ConnectivityCheckResult(
-                isReachable: false,
-                message: "SMB server is not reachable on port 445. AutoVolume will retry after the network returns."
-            )
+            return failure(.errorConnectivitySMBUnreachable)
         case .afp:
-            return ConnectivityCheckResult(
-                isReachable: false,
-                message: "AFP server is not reachable on port 548. AutoVolume will retry after the network returns."
-            )
+            return failure(.errorConnectivityAFPUnreachable)
         case .nfs:
-            return ConnectivityCheckResult(
-                isReachable: false,
-                message: "NFS server is not reachable on port 2049. Check the NFS service, firewall, export path, or network access."
-            )
+            return failure(.errorConnectivityNFSUnreachable)
         case .webdav:
             break
         }
 
+        // Raw command output, not a fixed sentence — nothing to key here. Stays English-only
+        // (it's whatever curl/nc printed), same as before.
         let detail = result.stderr.isEmpty ? result.stdout : result.stderr
         let trimmed = CommandResult.redacted(detail).trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             return ConnectivityCheckResult(isReachable: false, message: trimmed)
         }
 
-        return ConnectivityCheckResult(
+        return failure(.errorConnectivityTestFailed, args: [displayName(for: config.protocolType), String(result.exitCode)])
+    }
+
+    private func failure(_ key: L10nKey, args: [String] = []) -> ConnectivityCheckResult {
+        ConnectivityCheckResult(
             isReachable: false,
-            message: "\(displayName(for: config.protocolType)) connection test failed with exit code \(result.exitCode)."
+            message: L10n.t(key, args: args, in: .en),
+            messageKey: key,
+            messageArgs: args
         )
     }
 

@@ -8,6 +8,10 @@ public struct NTFSBundledInstallerPaths {
     public var ntfs3gDylibPath: String
     public var newsyslogConfPath: String
     public var sharedDylibPath: String
+    /// The running app bundle's `CFBundleVersion`, used to detect a Sparkle update that
+    /// replaced `/Applications/AutoVolume.app` without reinstalling the root-owned helper
+    /// copy under `/Library/PrivilegedHelperTools`.
+    public var bundleBuild: String
 
     public init(bundle: Bundle = .main) {
         let resourcesPath = bundle.resourcePath ?? "/Applications/AutoVolume.app/Contents/Resources"
@@ -21,6 +25,20 @@ public struct NTFSBundledInstallerPaths {
         // the installer copies this same file into the privileged driver directory so
         // NTFSPrivilegedHelper (running standalone as a LaunchDaemon) can load it too.
         self.sharedDylibPath = resourcesPath + "/../Frameworks/libAutoVolumeShared.dylib"
+        self.bundleBuild = Self.resolveBundleBuild(resourcesPath: resourcesPath)
+    }
+
+    /// `bundle.resourcePath` (above) is not itself a fully-formed app bundle — the Agent
+    /// process passes a `Bundle` rooted at `.../AutoVolume.app/Contents/Resources`, whose
+    /// own `infoDictionary` is empty. The real `Info.plist` (with `CFBundleVersion`) lives
+    /// two levels up, at `.../AutoVolume.app/Contents/Info.plist`, so resolve the `.app`
+    /// bundle explicitly from the resources path: resources dir → Contents → .app.
+    private static func resolveBundleBuild(resourcesPath: String) -> String {
+        let appBundlePath = URL(fileURLWithPath: resourcesPath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .path
+        return (Bundle(path: appBundlePath)?.infoDictionary?["CFBundleVersion"] as? String) ?? "0"
     }
 }
 
@@ -35,6 +53,7 @@ public final class NTFSAutoMountService {
     private let alertStore: AlertStore
     private let debouncer: NTFSRemountDebouncer
     private let bundledInstallerPaths: NTFSBundledInstallerPaths
+    private let logger: AutoVolumeLogger
     /// Once true, `installPlan` is never re-run for the remainder of this instance's
     /// lifetime (this is an in-memory, instance-scoped flag; it does not persist across
     /// Agent restarts — an accepted scoping tradeoff).
@@ -51,7 +70,8 @@ public final class NTFSAutoMountService {
         commandRunner: CommandRunner = ProcessCommandRunner(),
         alertStore: AlertStore = AlertStore(),
         debouncer: NTFSRemountDebouncer = NTFSRemountDebouncer(),
-        bundledInstallerPaths: NTFSBundledInstallerPaths = NTFSBundledInstallerPaths()
+        bundledInstallerPaths: NTFSBundledInstallerPaths = NTFSBundledInstallerPaths(),
+        logger: AutoVolumeLogger = .ntfs
     ) {
         self.settingsStore = settingsStore
         self.driverInstaller = driverInstaller
@@ -61,6 +81,7 @@ public final class NTFSAutoMountService {
         self.alertStore = alertStore
         self.debouncer = debouncer
         self.bundledInstallerPaths = bundledInstallerPaths
+        self.logger = logger
     }
 
     public func handleDiskEligibleForReadWrite(
@@ -72,23 +93,37 @@ public final class NTFSAutoMountService {
         mountedFileSystemName: String?
     ) {
         guard NTFSDiskClassifier.isNTFSFileSystem(personality: filesystemPersonality) else { return }
-        guard !NTFSDiskClassifier.isOwnedByOurDriver(mountedFileSystemName: mountedFileSystemName) else { return }
-        guard debouncer.shouldProcess(bsdName: bsdName) else { return }
+        guard !NTFSDiskClassifier.isOwnedByOurDriver(mountedFileSystemName: mountedFileSystemName) else {
+            logger.info("NTFS disk bsd=\(bsdName) kind=\(mountedFileSystemName ?? "unknown") name=\(volumeName) path=\(mountPoint) already owned by our driver, skipping")
+            return
+        }
+        guard debouncer.shouldProcess(bsdName: bsdName) else {
+            logger.info("NTFS disk bsd=\(bsdName) name=\(volumeName) debounced, skipping")
+            return
+        }
         debouncer.markProcessed(bsdName: bsdName)
 
         let settings = (try? settingsStore.load()) ?? AppSettings()
         guard settings.autoMountNTFSReadWrite else {
+            logger.info("NTFS disk bsd=\(bsdName) name=\(volumeName) auto-mount setting disabled, recording onboarding alert")
             try? alertStore.record(
                 volumeID: Self.onboardingAlertID,
                 volumeName: volumeName,
-                message: "检测到 NTFS 硬盘「\(volumeName)」。前往设置开启「NTFS 读写支持」即可以读写方式挂载。"
+                key: .alertNTFSOnboarding,
+                args: [volumeName]
             )
             return
         }
 
-        let wasFullyInstalled = driverInstaller.isFullyInstalled()
+        let wasFullyInstalled = driverInstaller.isFUSETInstalled()
+            && driverInstaller.isHelperInstalled(expectedBuild: bundledInstallerPaths.bundleBuild)
         if !wasFullyInstalled {
-            guard !hasAttemptedInstallThisSession else { return }
+            let stampMatches = driverInstaller.isHelperInstalled(expectedBuild: bundledInstallerPaths.bundleBuild)
+            logger.info("NTFS driver not fully installed for bsd=\(bsdName) (fuseTInstalled=\(driverInstaller.isFUSETInstalled()) helperBuildMatches=\(stampMatches) expectedBuild=\(bundledInstallerPaths.bundleBuild)); reinstall required")
+            guard !hasAttemptedInstallThisSession else {
+                logger.info("NTFS install already attempted this session; skipping bsd=\(bsdName)")
+                return
+            }
             hasAttemptedInstallThisSession = true
 
             let plan = driverInstaller.installPlan(
@@ -98,19 +133,30 @@ public final class NTFSAutoMountService {
                 bundledNTFS3GPath: bundledInstallerPaths.ntfs3gPath,
                 bundledNTFS3GDylibPath: bundledInstallerPaths.ntfs3gDylibPath,
                 bundledSharedDylibPath: bundledInstallerPaths.sharedDylibPath,
-                bundledNewsyslogConfPath: bundledInstallerPaths.newsyslogConfPath
+                bundledNewsyslogConfPath: bundledInstallerPaths.newsyslogConfPath,
+                bundleBuild: bundledInstallerPaths.bundleBuild
             )
+            logger.info("NTFS driver install started for bsd=\(bsdName)")
+            let installStart = DispatchTime.now().uptimeNanoseconds
             let installResult = try? commandRunner.run(plan)
+            let installDurationMs = (DispatchTime.now().uptimeNanoseconds - installStart) / 1_000_000
             guard let installResult, installResult.exitCode == 0 else {
+                let exitCode = installResult?.exitCode ?? -1
+                let stderr = CommandResult.redacted(installResult?.stderr ?? "")
+                logger.warning("NTFS driver install finished exitCode=\(exitCode) stderr=\(stderr) duration_ms=\(installDurationMs)")
                 try? alertStore.record(
                     volumeID: Self.onboardingAlertID,
                     volumeName: volumeName,
-                    message: "NTFS 驱动安装失败或被取消，「\(volumeName)」已保留为只读。可在设置中关闭再开启「NTFS 读写支持」以重试。"
+                    key: .alertNTFSInstallFailed,
+                    args: [volumeName]
                 )
                 return
             }
+            logger.info("NTFS driver install finished exitCode=0 duration_ms=\(installDurationMs)")
         }
 
+        logger.info("NTFS helper request sent: device=\(devicePath) -> mountPoint=\(mountPoint)")
+        let responseStart = DispatchTime.now().uptimeNanoseconds
         var response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
         if !wasFullyInstalled, response.message.contains("could not connect") {
             // launchctl bootstrap returns once the job is loaded, not once the daemon has
@@ -123,24 +169,31 @@ public final class NTFSAutoMountService {
                 if response.success { break }
             }
         }
+        let responseDurationMs = (DispatchTime.now().uptimeNanoseconds - responseStart) / 1_000_000
+        logger.info("NTFS helper response: \(response.success ? "success" : "failure") message=\(CommandResult.redacted(response.message)) duration_ms=\(responseDurationMs)")
 
         guard response.success else {
             try? alertStore.record(
                 volumeID: mountFailureAlertID(for: bsdName),
                 volumeName: volumeName,
-                message: "NTFS 硬盘「\(volumeName)」读写挂载失败：\(response.message)。已保留为只读。"
+                key: .alertNTFSMountFailed,
+                args: [volumeName, response.message]
             )
             _ = try? commandRunner.run(CommandPlan(executable: "/usr/sbin/diskutil", arguments: ["mount", bsdName]))
             return
         }
 
         try? mountedVolumesStore.add(NTFSVolume(bsdName: bsdName, volumeName: volumeName, devicePath: devicePath, mountPoint: mountPoint, mountedAt: Date()))
+        logger.info("NTFS volume recorded bsd=\(bsdName) name=\(volumeName) path=\(mountPoint)")
         try? alertStore.resolve(volumeID: Self.onboardingAlertID)
     }
 
     public func handleDiskDisappeared(bsdName: String) {
         if let volume = (try? mountedVolumesStore.load())?.first(where: { $0.bsdName == bsdName }) {
+            logger.info("NTFS disk disappeared bsd=\(bsdName) name=\(volume.volumeName) path=\(volume.mountPoint), cleaning up")
             _ = helperClient.send(NTFSHelperRequest(action: .unmount, mountPoint: volume.mountPoint))
+        } else {
+            logger.info("NTFS disk disappeared bsd=\(bsdName), cleaning up")
         }
         try? mountedVolumesStore.remove(bsdName: bsdName)
         debouncer.clear(bsdName: bsdName)

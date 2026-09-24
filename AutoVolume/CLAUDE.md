@@ -14,6 +14,9 @@ SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMEN
 
 ## Release workflow after code changes
 
+> **铁律 / HARD RULE — 每次修改完成必须提升版本号，绝不覆盖已有版本。**
+> Every build handed to the user after ANY code change MUST have a new, never-used version (patch +1 in `CFBundleShortVersionString`, `CFBundleVersion` +1). **Never** rebuild or repackage under a version number that already has a DMG in `dist/` or was ever handed to the user — not for "small fixes", not for review-fix waves, not for "the same release, just corrected". Each distinct build = distinct version, so the user can tell which build a bug came from. `script/package_dmg.sh` refuses to overwrite an existing DMG; never delete an old DMG to get around that. This rule also overrides any plan text that says "bump once at the end": plans batch work, but every DMG given to the user gets its own version.
+
 After finishing any code change in this project (including small/intermediate iterations, not just final "done" states), automatically:
 
 1. **Bump the version** in `Resources/Info.plist`:

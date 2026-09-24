@@ -47,17 +47,18 @@ struct VolumeEditorView: View {
     }
 
     var body: some View {
+        let _ = viewModel.languageRevision
         VStack(alignment: .leading, spacing: 12) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
                         GridRow {
-                            Text(viewModel.strings.name)
-                            editorTextField(viewModel.strings.name, text: $name, focusesOnAppear: true)
+                            Text(L10n.t(.editorName))
+                            editorTextField(L10n.t(.editorName), text: $name, focusesOnAppear: true)
                         }
                         GridRow {
-                            Text(viewModel.strings.protocolLabel)
-                            Picker(viewModel.strings.protocolLabel, selection: $protocolType) {
+                            Text(L10n.t(.editorProtocolLabel))
+                            Picker(L10n.t(.editorProtocolLabel), selection: $protocolType) {
                                 ForEach(VolumeProtocol.allCases) { item in
                                     Text(item.rawValue.uppercased()).tag(item)
                                 }
@@ -65,31 +66,31 @@ struct VolumeEditorView: View {
                             .labelsHidden()
                         }
                         GridRow {
-                            Text(viewModel.strings.server)
-                            editorTextField(viewModel.strings.server, text: $server)
+                            Text(L10n.t(.editorServer))
+                            editorTextField(L10n.t(.editorServer), text: $server)
                         }
                         GridRow {
-                            Text(viewModel.strings.remotePath)
+                            Text(L10n.t(.editorRemotePath))
                                 .gridCellAnchor(.topLeading)
                             VStack(alignment: .leading, spacing: 4) {
-                                editorTextField(viewModel.strings.remotePath, text: $remotePath)
-                                Text(viewModel.strings.remotePathHelp)
+                                editorTextField(L10n.t(.editorRemotePath), text: $remotePath)
+                                Text(L10n.t(.editorRemotePathHelp))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         GridRow {
-                            Text(viewModel.strings.username)
-                            editorTextField(viewModel.strings.username, text: $username)
+                            Text(L10n.t(.editorUsername))
+                            editorTextField(L10n.t(.editorUsername), text: $username)
                         }
                         GridRow {
-                            Text(viewModel.strings.password)
+                            Text(L10n.t(.editorPassword))
                             HStack {
                                 if isPasswordVisible {
-                                    editorTextField(viewModel.strings.password, text: $password)
+                                    editorTextField(L10n.t(.editorPassword), text: $password)
                                 } else {
-                                    editorTextField(viewModel.strings.password, text: $password, isSecure: true)
+                                    editorTextField(L10n.t(.editorPassword), text: $password, isSecure: true)
                                 }
                                 Button {
                                     isPasswordVisible.toggle()
@@ -97,27 +98,27 @@ struct VolumeEditorView: View {
                                     Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
                                 }
                                 .buttonStyle(.borderless)
-                                .help(isPasswordVisible ? viewModel.strings.hidePassword : viewModel.strings.showPassword)
+                                .help(isPasswordVisible ? L10n.t(.editorHidePassword) : L10n.t(.editorShowPassword))
                             }
                         }
                         GridRow {
-                            Text(viewModel.strings.mountPoint)
-                            editorTextField(viewModel.strings.mountPoint, text: $mountPoint)
+                            Text(L10n.t(.editorMountPoint))
+                            editorTextField(L10n.t(.editorMountPoint), text: $mountPoint)
                         }
                     }
 
                     Slider(value: $intervalMinutes, in: 1...60, step: 1) {
-                        Text(viewModel.strings.checkInterval)
+                        Text(L10n.t(.editorCheckInterval))
                     }
-                    Text(viewModel.strings.everyMinutes(Int(intervalMinutes)))
+                    Text(L10n.t(.editorEveryMinutes, String(Int(intervalMinutes))))
                         .foregroundStyle(.secondary)
 
                     if protocolType == .smb {
                         Divider()
                         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                             GridRow {
-                                Text(viewModel.strings.smbDialect)
-                                Picker(viewModel.strings.smbDialect, selection: $smbDialect) {
+                                Text(L10n.t(.editorSmbDialect))
+                                Picker(L10n.t(.editorSmbDialect), selection: $smbDialect) {
                                     ForEach(SMBDialect.allCases) { dialect in
                                         Text(dialect.displayName).tag(dialect)
                                     }
@@ -125,12 +126,12 @@ struct VolumeEditorView: View {
                                 .labelsHidden()
                             }
                             GridRow {
-                                Text(viewModel.strings.smbMultichannel)
+                                Text(L10n.t(.editorSmbMultichannel))
                                 Toggle("", isOn: $isSMBMultichannelEnabled)
                                     .labelsHidden()
                             }
                             GridRow {
-                                Text(viewModel.strings.smbAsyncReads)
+                                Text(L10n.t(.editorSmbAsyncReads))
                                 Stepper("\(Int(smbAsyncDirectoryQueryCount))", value: $smbAsyncDirectoryQueryCount, in: 1...64, step: 1)
                             }
                         }
@@ -149,45 +150,45 @@ struct VolumeEditorView: View {
                 if isWorking {
                     ProgressView()
                         .controlSize(.small)
-                    Text(viewModel.strings.working)
+                    Text(L10n.t(.statusWorking))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                Button(viewModel.strings.cancel) {
+                Button(L10n.t(.editorCancel)) {
                     AutoVolumeLogger.shared.info("Cancel button selected")
                     onCancel()
                 }
                 .buttonStyle(.bordered)
                 .disabled(isWorking)
                 Spacer()
-                Button(viewModel.strings.test) {
+                Button(L10n.t(.editorTest)) {
                     Task {
-                        await runAsync(status: viewModel.strings.testing, closeOnSuccess: false) {
+                        await runAsync(status: L10n.t(.statusTesting), closeOnSuccess: false) {
                             try await viewModel.testConnectionAsync(makeConfig(), password: password.isEmpty ? nil : password)
                         }
                     }
                 }
                 .buttonStyle(.bordered)
                 .disabled(isWorking)
-                Button(viewModel.strings.save) {
+                Button(L10n.t(.editorSave)) {
                     Task {
-                        await runAsync(status: viewModel.strings.working, closeOnSuccess: true) {
+                        await runAsync(status: L10n.t(.statusWorking), closeOnSuccess: true) {
                             try await viewModel.saveAsync(makeConfig(), password: password.isEmpty ? nil : password)
-                            return viewModel.strings.saved
+                            return L10n.t(.statusSaved)
                         }
                     }
                 }
                 .buttonStyle(.bordered)
                 .disabled(isWorking)
-                Button(viewModel.strings.saveAndMount) {
+                Button(L10n.t(.editorSaveAndMount)) {
                     Task {
-                        await runAsync(status: viewModel.strings.mounting, closeOnSuccess: true) {
+                        await runAsync(status: L10n.t(.statusMounting), closeOnSuccess: true) {
                             let config = makeConfig()
                             try await viewModel.saveAsync(config, password: password.isEmpty ? nil : password)
                             do {
                                 return try await viewModel.mountAsync(config, password: password.isEmpty ? nil : password)
                             } catch {
-                                return "\(viewModel.strings.saved) \(error.localizedDescription)"
+                                return "\(L10n.t(.statusSaved)) \(error.localizedDescription)"
                             }
                         }
                     }

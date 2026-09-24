@@ -7,11 +7,13 @@ final class StatusBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let viewModel: AppViewModel
+    private let updateService: UpdateService
     private let editorController = EditorWindowController()
     private let settingsController = SettingsWindowController()
 
-    init(viewModel: AppViewModel) {
+    init(viewModel: AppViewModel, updateService: UpdateService) {
         self.viewModel = viewModel
+        self.updateService = updateService
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configureStatusItem()
@@ -19,9 +21,12 @@ final class StatusBarController: NSObject {
         AutoVolumeLogger.shared.info("Status bar controller started")
     }
 
+    private static let idleStatusImageName = "externaldrive.connected.to.line.below"
+    private static let workingStatusImageName = "arrow.triangle.2.circlepath"
+
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
-        button.image = NSImage(systemSymbolName: "externaldrive.connected.to.line.below", accessibilityDescription: "AutoVolume")
+        button.image = NSImage(systemSymbolName: Self.idleStatusImageName, accessibilityDescription: "AutoVolume")
         button.imagePosition = .imageOnly
         button.target = self
         button.action = #selector(statusItemClicked(_:))
@@ -35,9 +40,21 @@ final class StatusBarController: NSObject {
             rootView: ContentView(
                 viewModel: viewModel,
                 onAdd: { [weak self] in self?.showEditor(volume: nil) },
-                onEdit: { [weak self] volume in self?.showEditor(volume: volume) }
+                onEdit: { [weak self] volume in self?.showEditor(volume: volume) },
+                onWorkingChanged: { [weak self] isWorking in self?.setWorking(isWorking) }
             )
             .frame(width: 620, height: 520)
+        )
+    }
+
+    /// Called on the main actor by `ContentView` whenever any volume is mounting/unmounting,
+    /// so the status-item icon gives feedback even after the popover has closed (it closes the
+    /// instant Mount/Unmount is clicked).
+    private func setWorking(_ isWorking: Bool) {
+        guard let button = statusItem.button else { return }
+        button.image = NSImage(
+            systemSymbolName: isWorking ? Self.workingStatusImageName : Self.idleStatusImageName,
+            accessibilityDescription: "AutoVolume"
         )
     }
 
@@ -66,11 +83,12 @@ final class StatusBarController: NSObject {
 
     private func showContextMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: localized("查看日志", "View Logs"), action: #selector(openLogs), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: localized("设置", "Settings"), action: #selector(openSettings), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: localized("关于", "About"), action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: L10n.t(.menuViewLogs), action: #selector(openLogs), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: L10n.t(.menuExportDiagnostics), action: #selector(exportDiagnostics), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: L10n.t(.menuSettings), action: #selector(openSettings), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: L10n.t(.menuCheckForUpdates), action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: localized("退出", "Quit"), action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L10n.t(.menuQuit), action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items {
             item.target = self
         }
@@ -101,26 +119,47 @@ final class StatusBarController: NSObject {
         }
     }
 
-    @objc private func openSettings() {
-        AutoVolumeLogger.shared.info("Opened settings")
-        let viewModel = viewModel
-        DispatchQueue.main.async { [weak self] in
-            self?.settingsController.show(viewModel: viewModel)
+    @objc private func exportDiagnostics() {
+        AutoVolumeLogger.shared.info("Export diagnostics requested")
+        let failureTitle = L10n.t(.alertExportDiagnosticsFailedTitle)
+        let okTitle = L10n.t(.alertOk)
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let exporter = DiagnosticsExporter(ntfsLogURL: AutoVolumeLogger.ntfs.logFileURL)
+                let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+                    ?? FileManager.default.homeDirectoryForCurrentUser
+                let zip = try exporter.export(to: desktop)
+                DispatchQueue.main.async {
+                    AutoVolumeLogger.shared.info("Diagnostics exported to \(zip.path)")
+                    NSWorkspace.shared.activateFileViewerSelecting([zip])
+                }
+            } catch {
+                AutoVolumeLogger.shared.error("Export diagnostics failed: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = failureTitle
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: okTitle)
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
+                }
+            }
         }
     }
 
-    @objc private func showAbout() {
-        let info = Bundle.main.infoDictionary ?? [:]
-        let version = info["CFBundleShortVersionString"] as? String ?? "-"
-        let build = info["CFBundleVersion"] as? String ?? "-"
-        let alert = NSAlert()
-        alert.messageText = "AutoVolume（智卷）"
-        alert.informativeText = "\(localized("版本", "Version")) \(version) (\(build))"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
-        AutoVolumeLogger.shared.info("Opened about dialog")
+    @objc private func openSettings() {
+        AutoVolumeLogger.shared.info("Opened settings")
+        let viewModel = viewModel
+        let updateService = updateService
+        DispatchQueue.main.async { [weak self] in
+            self?.settingsController.show(viewModel: viewModel, updateService: updateService)
+        }
+    }
+
+    @objc private func checkForUpdates() {
+        AutoVolumeLogger.shared.info("Check for updates requested")
+        updateService.checkForUpdates()
     }
 
     @objc private func quit() {
@@ -128,15 +167,31 @@ final class StatusBarController: NSObject {
         LaunchAgentInstaller.stop()
         NSApp.terminate(nil)
     }
-
-    private func localized(_ chinese: String, _ english: String) -> String {
-        viewModel.language == .chinese ? chinese : english
-    }
 }
 
 @MainActor
 private final class EditorWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
+    private var languageChangeObserver: NSObjectProtocol?
+
+    override init() {
+        super.init()
+        languageChangeObserver = NotificationCenter.default.addObserver(
+            forName: .autoVolumeLanguageChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.window?.title = L10n.t(.appProductName)
+            }
+        }
+    }
+
+    deinit {
+        if let languageChangeObserver {
+            NotificationCenter.default.removeObserver(languageChangeObserver)
+        }
+    }
 
     func show(viewModel: AppViewModel, volume: VolumeConfig?) {
         if let volume {
@@ -165,7 +220,7 @@ private final class EditorWindowController: NSObject, NSWindowDelegate {
         editorWindow.contentViewController = hostingController
         editorWindow.delegate = self
         editorWindow.identifier = NSUserInterfaceItemIdentifier("volume-editor")
-        editorWindow.title = viewModel.productName
+        editorWindow.title = L10n.t(.appProductName)
         editorWindow.level = .floating
         editorWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
         editorWindow.hidesOnDeactivate = false
@@ -196,12 +251,32 @@ private final class EditorWindowController: NSObject, NSWindowDelegate {
 @MainActor
 private final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
+    private var languageChangeObserver: NSObjectProtocol?
 
-    func show(viewModel: AppViewModel) {
-        let root = SettingsView(viewModel: viewModel)
+    override init() {
+        super.init()
+        languageChangeObserver = NotificationCenter.default.addObserver(
+            forName: .autoVolumeLanguageChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.window?.title = L10n.t(.menuSettings)
+            }
+        }
+    }
+
+    deinit {
+        if let languageChangeObserver {
+            NotificationCenter.default.removeObserver(languageChangeObserver)
+        }
+    }
+
+    func show(viewModel: AppViewModel, updateService: UpdateService) {
+        let root = SettingsView(viewModel: viewModel, updateService: updateService)
         let hostingController = NSHostingController(rootView: root)
         let settingsWindow = window ?? NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: true
@@ -209,7 +284,7 @@ private final class SettingsWindowController: NSObject, NSWindowDelegate {
         settingsWindow.contentViewController = hostingController
         settingsWindow.delegate = self
         settingsWindow.identifier = NSUserInterfaceItemIdentifier("settings")
-        settingsWindow.title = viewModel.language == .chinese ? "设置" : "Settings"
+        settingsWindow.title = L10n.t(.menuSettings)
         settingsWindow.level = .floating
         settingsWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
         settingsWindow.hidesOnDeactivate = false

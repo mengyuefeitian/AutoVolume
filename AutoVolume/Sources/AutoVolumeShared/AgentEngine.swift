@@ -50,8 +50,11 @@ public final class AgentEngine {
             }
             return .mounted
         }
-        let message = result.stderr.isEmpty ? "Mount command failed with exit code \(result.exitCode)." : result.stderr
-        return .failed(message: message)
+        guard result.stderr.isEmpty else {
+            // Raw command stderr, not a fixed sentence — nothing to key.
+            return .failed(message: result.stderr)
+        }
+        return mountCommandFailedStatus(exitCode: result.exitCode)
     }
 
     private func runMount(config: VolumeConfig, password: String?) throws -> CommandResult {
@@ -73,14 +76,28 @@ public final class AgentEngine {
         _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
         let result = try runMount(config: config, password: password)
         guard result.exitCode == 0 else {
-            let message = result.stderr.isEmpty ? "Mount command failed with exit code \(result.exitCode)." : result.stderr
-            return .failed(message: message)
+            guard result.stderr.isEmpty else {
+                return .failed(message: result.stderr)
+            }
+            return mountCommandFailedStatus(exitCode: result.exitCode)
         }
         try mountExposure.expose(config: config, planner: mountPlanner)
         guard mountState.isMounted(config: config) else {
-            return .failed(message: "Mount command succeeded, but the mounted volume did not respond. AutoVolume will retry on the next check.")
+            return .failed(
+                message: L10n.t(.errorAgentMountUnresponsive, args: [], in: .en),
+                key: L10nKey.errorAgentMountUnresponsive.rawValue
+            )
         }
         return .mounted
+    }
+
+    private func mountCommandFailedStatus(exitCode: Int32) -> VolumeStatus {
+        let args = [String(exitCode)]
+        return .failed(
+            message: L10n.t(.errorAgentMountCommandFailed, args: args, in: .en),
+            key: L10nKey.errorAgentMountCommandFailed.rawValue,
+            args: args
+        )
     }
 
     private func isOccupiedMountPointError(_ result: CommandResult) -> Bool {

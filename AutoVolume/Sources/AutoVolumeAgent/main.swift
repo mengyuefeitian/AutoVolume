@@ -3,6 +3,8 @@ import Darwin
 import DiskArbitration
 import AutoVolumeShared
 
+AutoVolumeLogger.migrateLegacyLogIfNeeded()
+
 let sessionFilePath = parsedSessionFilePath(arguments: CommandLine.arguments)
 let launchAgentLabel = "com.autovolume.agent"
 let store = JSONConfigStore()
@@ -26,12 +28,27 @@ let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvin
 let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
 let ntfsAutoMountService = NTFSAutoMountService(bundledInstallerPaths: NTFSBundledInstallerPaths(bundle: Bundle(path: appResourcesPath) ?? Bundle.main))
 
+func logEnvironmentLine() {
+    let appBundlePath = URL(fileURLWithPath: appResourcesPath).deletingLastPathComponent().deletingLastPathComponent().path
+    let info = Bundle(path: appBundlePath)?.infoDictionary ?? [:]
+    let version = info["CFBundleShortVersionString"] as? String ?? "-"
+    let build = info["CFBundleVersion"] as? String ?? "-"
+    var systemInfo = utsname()
+    uname(&systemInfo)
+    let arch = withUnsafePointer(to: &systemInfo.machine) {
+        $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
+    }
+    AutoVolumeLogger.shared.info("Environment app=\(version)(\(build)) macOS=\(ProcessInfo.processInfo.operatingSystemVersionString) arch=\(arch)")
+}
+
+logEnvironmentLine()
+
 /// Pulls the fields we need out of a disk's DiskArbitration description and, if the disk
 /// looks like an eligible NTFS volume, hands it to the auto-mount service. Shared by both
 /// the disk-appeared and disk-description-changed callbacks below, since either one may be
 /// the first to observe `kDADiskDescriptionVolumePathKey` becoming available (see comment
 /// on `DARegisterDiskDescriptionChangedCallback` registration for why both are needed).
-func handleDiskDescriptionIfEligible(_ disk: DADisk) {
+func handleDiskDescriptionIfEligible(_ disk: DADisk, event: String) {
     guard let description = DADiskCopyDescription(disk) as? [String: Any] else { return }
     guard let namePtr = DADiskGetBSDName(disk) else { return }
     let bsdName = String(cString: namePtr)
@@ -41,7 +58,9 @@ func handleDiskDescriptionIfEligible(_ disk: DADisk) {
     // doesn't expose two separate keys for this. Not a bug; don't "fix" it into two lookups.
     let personality = description[kDADiskDescriptionVolumeKindKey as String] as? String
     let volumeName = description[kDADiskDescriptionVolumeNameKey as String] as? String ?? bsdName
-    guard let volumePath = description[kDADiskDescriptionVolumePathKey as String] as? URL else { return }
+    let volumePathValue = description[kDADiskDescriptionVolumePathKey as String] as? URL
+    AutoVolumeLogger.ntfs.info("NTFS disk \(event) bsd=\(bsdName) kind=\(personality ?? "unknown") name=\(volumeName) path=\(volumePathValue?.path ?? "unavailable")")
+    guard let volumePath = volumePathValue else { return }
     let mountedFileSystemName = description[kDADiskDescriptionVolumeKindKey as String] as? String
     ntfsAutoMountService.handleDiskEligibleForReadWrite(
         bsdName: bsdName,
@@ -58,7 +77,7 @@ func startNTFSDiskWatcher() {
     DASessionScheduleWithRunLoop(session, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
 
     let appearedCallback: DADiskAppearedCallback = { disk, _ in
-        handleDiskDescriptionIfEligible(disk)
+        handleDiskDescriptionIfEligible(disk, event: "appeared")
     }
     // DADiskAppearedCallback typically fires BEFORE diskarbitrationd finishes mounting the
     // volume, at which point kDADiskDescriptionVolumePathKey is still absent and the guard
@@ -67,12 +86,13 @@ func startNTFSDiskWatcher() {
     // check there. NTFSRemountDebouncer (see handleDiskEligibleForReadWrite) makes duplicate
     // delivery across the two callbacks safe.
     let descriptionChangedCallback: DADiskDescriptionChangedCallback = { disk, _, _ in
-        handleDiskDescriptionIfEligible(disk)
+        handleDiskDescriptionIfEligible(disk, event: "description-changed")
     }
     let disappearedCallback: DADiskDisappearedCallback = { disk, _ in
         guard let namePtr = DADiskGetBSDName(disk) else { return }
         let bsdName = String(cString: namePtr)
         guard !bsdName.isEmpty else { return }
+        AutoVolumeLogger.ntfs.info("NTFS disk disappeared bsd=\(bsdName)")
         ntfsAutoMountService.handleDiskDisappeared(bsdName: bsdName)
     }
     DARegisterDiskAppearedCallback(session, nil, appearedCallback, nil)
@@ -111,7 +131,11 @@ func runOnce() {
                 networkFailedVolumeIDs.insert(config.id)
                 scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, retryInterval: 60, now: now))
                 AutoVolumeLogger.shared.warning("Server is not reachable for \(config.name): \(connectivity.message ?? "network unavailable")")
-                try? alertStore.record(volumeID: config.id, volumeName: config.name, message: connectivity.message ?? "Server is not reachable. AutoVolume will retry after the network returns.", date: now)
+                if let key = connectivity.messageKey {
+                    try? alertStore.record(volumeID: config.id, volumeName: config.name, key: key, args: connectivity.messageArgs, date: now)
+                } else {
+                    try? alertStore.record(volumeID: config.id, volumeName: config.name, message: connectivity.message ?? "Server is not reachable. AutoVolume will retry after the network returns.", date: now)
+                }
                 continue
             }
 
@@ -134,8 +158,12 @@ func runOnce() {
                 networkFailedVolumeIDs.remove(config.id)
                 try? alertStore.resolve(volumeID: config.id)
                 AutoVolumeLogger.shared.info("Agent check mounted for \(config.name)")
-            case .failed(let message):
-                try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
+            case .failed(let message, let key, let args):
+                if let key {
+                    try? alertStore.record(volumeID: config.id, volumeName: config.name, key: L10nKey(rawValue: key), args: args, date: now)
+                } else {
+                    try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
+                }
                 AutoVolumeLogger.shared.warning("Agent check failed for \(config.name): \(message)")
             case .unmounted, .checking:
                 break
@@ -196,7 +224,7 @@ func checkedDate(for status: VolumeStatus, interval: TimeInterval, now: Date) ->
     case .mounted:
         return now
     case .unmounted, .checking, .failed:
-        if case .failed(let message) = status, isNetworkFailure(message) {
+        if case .failed(let message, _, _) = status, isNetworkFailure(message) {
             return retryCheckedDate(interval: interval, retryInterval: 60, now: now)
         }
         return now

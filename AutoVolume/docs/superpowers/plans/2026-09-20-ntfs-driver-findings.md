@@ -56,3 +56,11 @@
 - 首次安装时（与 FUSE-T pkg 安装同一次管理员密码授权流程）一并安装并启动这个 LaunchDaemon。
 - `AutoVolumeAgent`（无权限）通过本地 Unix domain socket 向 LaunchDaemon 发送挂载/卸载请求，不再自己直接 `Process` 调用 `ntfs-3g`。
 - 后续任务需要新增：`NTFSPrivilegedHelper`（LaunchDaemon 的可执行文件 + plist）、一个简单的请求/响应协议、`NTFSMountPlanner` 需要改为构造"发给 helper 的请求"而不是直接构造 `ntfs-3g` 的 `CommandPlan`。
+
+## Rebuild for 14.0（2026-09-24）
+
+上面第 2 条记录的手工构建产物 minos=27.0，导致 `check_binary_compat.sh` 门禁在 macOS 14–26 上失败。已改为可复现脚本 `script/build_ntfs3g.sh`：以 `MACOSX_DEPLOYMENT_TARGET=14.0` + `-mmacosx-version-min=14.0` 重新 clone 并编译 `macos-fuse-t/ntfs-3g`，产出 `ntfs-3g` 和 `libntfs-3g.89.dylib` 替换 `Resources/NTFSDriver` 下的旧文件，install name / rpath / 依赖列表与旧版完全一致（`@loader_path/libntfs-3g.89.dylib`、`@rpath/libfuse-t.dylib`、`libSystem`、`CoreFoundation`，`LC_RPATH /usr/local/lib`）。
+
+FUSE-T 头文件（`fuse.h` 等）在本机 `/usr/local/include/fuse` 不存在时，脚本支持通过 `FUSE_INCLUDE` 环境变量指向从 `Resources/NTFSDriver/fuse-t-installer.pkg` 用 `pkgutil --expand-full` 解出的 `.../fuse-t-core.pkg/Payload/Library/Application Support/fuse-t/include/fuse` 目录；注意该路径含空格，需先复制到一个不含空格的临时目录再传给 `FUSE_INCLUDE`（否则 `CPPFLAGS` 在 `configure`/`make` 内部被空格拆分，`configure` 会报 "C compiler cannot create executables"）。
+
+详见 `script/build_ntfs3g.sh`。

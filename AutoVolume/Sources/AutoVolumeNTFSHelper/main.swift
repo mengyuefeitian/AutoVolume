@@ -55,6 +55,72 @@ log("listening on \(socketPath)")
 let mountPlanner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
 let commandRunner = ProcessCommandRunner()
 
+// Tracks every mount point currently served by our ntfs-3g processes so the `log stream`
+// subprocess below (started after the first successful mount) can be stopped once the
+// last one is unmounted, instead of leaking a stream process forever.
+var mountedNTFSMountPoints: Set<String> = []
+var ntfsLogStreamProcess: Process?
+
+/// ntfs-3g daemonizes after a successful mount, so its own runtime I/O errors (e.g. a
+/// failed copy) never reach this helper's stdout/stderr — they only go to the unified
+/// log, tagged with the ntfs-3g process name. The same is true of FUSE-T's user-space
+/// NFS server, which ntfs-3g itself talks to. Streaming both into this helper's stderr
+/// (already redirected to /var/log/com.autovolume.ntfshelper.log, rotated by newsyslog)
+/// means a `diagnostics export` on the user's machine captures them without anyone
+/// needing to run Console.app.
+///
+/// The predicate below could not be verified against a live FUSE-T NFS server process in
+/// this environment (no NTFS disk was available to mount), so it intentionally casts a
+/// wider net than "go-nfsv4" alone: ntfs-3g plus anything with "fuse" or "nfs" in its
+/// process name.
+let ntfsLogStreamPredicate = #"process == "ntfs-3g" OR process CONTAINS[c] "fuse" OR process CONTAINS[c] "nfs""#
+
+/// True if `path` is still an actual mount point for something (any filesystem), false
+/// if the path is gone entirely or is no longer where anything is mounted. Used because
+/// `diskutil unmount` reliably fails once the underlying device has already vanished
+/// (e.g. a physical eject that beat the agent's unmount request there), which must not
+/// be treated as "the unmount failed, leave it tracked forever".
+func isStillAMountPoint(_ path: String) -> Bool {
+    var stat = statfs()
+    guard statfs(path, &stat) == 0 else {
+        // Most commonly ENOENT: the mount point directory itself is gone.
+        return false
+    }
+    let mountedOn = withUnsafeBytes(of: &stat.f_mntonname) { raw -> String in
+        let buffer = raw.bindMemory(to: CChar.self)
+        return String(cString: buffer.baseAddress!)
+    }
+    return mountedOn == path
+}
+
+func startNTFSLogStreamIfNeeded() {
+    if let existing = ntfsLogStreamProcess {
+        if existing.isRunning { return }
+        // The stream process died on its own (e.g. killed externally); treat it as
+        // stopped so a subsequent mount restarts it instead of silently doing nothing.
+        ntfsLogStreamProcess = nil
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+    process.arguments = ["stream", "--style", "compact", "--predicate", ntfsLogStreamPredicate]
+    process.standardOutput = FileHandle.standardError
+    process.standardError = FileHandle.standardError
+    do {
+        try process.run()
+        ntfsLogStreamProcess = process
+        log("started log stream for NTFS/FUSE-T processes (pid \(process.processIdentifier))")
+    } catch {
+        log("failed to start log stream: \(error.localizedDescription)")
+    }
+}
+
+func stopNTFSLogStreamIfRunning() {
+    guard let process = ntfsLogStreamProcess else { return }
+    process.terminate()
+    ntfsLogStreamProcess = nil
+    log("stopped log stream (no NTFS volumes remain mounted)")
+}
+
 func peerUID(of fileDescriptor: Int32) -> uid_t? {
     var credential = xucred()
     var credentialSize = socklen_t(MemoryLayout<xucred>.size)
@@ -189,14 +255,35 @@ func handle(clientSocket: Int32) {
                 return
             }
             _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
-            let mountResult = try commandRunner.run(mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint))
+            let mountPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint)
+            let mountStart = DispatchTime.now().uptimeNanoseconds
+            let mountResult = try commandRunner.run(mountPlan)
+            let mountDurationMs = (DispatchTime.now().uptimeNanoseconds - mountStart) / 1_000_000
             let success = mountResult.exitCode == 0
+            log("ntfs-3g args=\(mountPlan.arguments) exitCode=\(mountResult.exitCode) stdout=\(mountResult.stdout) stderr=\(mountResult.stderr) duration_ms=\(mountDurationMs)")
             log("mount \(devicePath) -> \(mountPoint): \(success ? "success" : "failed (\(mountResult.stderr))")")
+            if success {
+                mountedNTFSMountPoints.insert(mountPoint)
+                startNTFSLogStreamIfNeeded()
+            }
             respond(NTFSHelperResponse(success: success, message: mountResult.stderr), on: clientSocket)
         case .unmount:
+            let unmountStart = DispatchTime.now().uptimeNanoseconds
             let result = try commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+            let unmountDurationMs = (DispatchTime.now().uptimeNanoseconds - unmountStart) / 1_000_000
             let success = result.exitCode == 0
-            log("unmount \(mountPoint): \(success ? "success" : "failed (\(result.stderr))")")
+            // On a normal eject, the disk is already gone by the time the agent's
+            // unmount request arrives, so `diskutil unmount` predictably fails here —
+            // that must not be treated as "still mounted, keep tracking it forever".
+            // Fall back to checking whether the path is actually a mount point anymore.
+            let stillTracked = !success && isStillAMountPoint(mountPoint)
+            log("unmount \(mountPoint): \(success ? "success" : (stillTracked ? "failed (\(result.stderr))" : "already gone (\(result.stderr))")) exitCode=\(result.exitCode) duration_ms=\(unmountDurationMs)")
+            if !stillTracked {
+                mountedNTFSMountPoints.remove(mountPoint)
+                if mountedNTFSMountPoints.isEmpty {
+                    stopNTFSLogStreamIfRunning()
+                }
+            }
             respond(NTFSHelperResponse(success: success, message: result.stderr), on: clientSocket)
         }
     } catch {

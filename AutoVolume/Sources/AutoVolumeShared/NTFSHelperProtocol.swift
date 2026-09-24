@@ -8,6 +8,10 @@ public enum NTFSDriverPaths {
     /// as a LaunchDaemon (not from inside the app bundle), a copy of the shared dylib is
     /// installed alongside the driver so its rpath can resolve it at load time.
     public static var sharedLibraryPath: String { installDirectory + "/libAutoVolumeShared.dylib" }
+    /// Stamped with the app bundle's `CFBundleVersion` after each successful install, so a
+    /// Sparkle update that replaces `/Applications/AutoVolume.app` (but not this root-owned
+    /// directory) can be detected and trigger a reinstall.
+    public static var versionStampPath: String { installDirectory + "/installed-build" }
 }
 
 public enum NTFSHelperSocket {

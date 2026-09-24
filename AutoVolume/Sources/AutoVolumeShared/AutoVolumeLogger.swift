@@ -2,7 +2,15 @@ import Foundation
 import Darwin
 
 public final class AutoVolumeLogger {
+    /// `Logs/AutoVolume.log`: app lifecycle, environment line, UI actions, main-thread
+    /// stall watchdog, network mounts (SMB/WebDAV/AFP/NFS, both app and agent checks),
+    /// and updates. Kept in one file so the stall watchdog, WebDAV phase timings, and
+    /// agent checks can be read on a single timeline.
     public static let shared = AutoVolumeLogger()
+    /// `Logs/NTFS.log`: everything NTFS from both the app and the agent (DiskArbitration
+    /// events, eligibility/skip reasons, driver install, helper request/response). Kept
+    /// separate so it isn't buried under the agent's periodic network checks.
+    public static let ntfs = AutoVolumeLogger(fileName: "NTFS.log")
 
     public let logFileURL: URL
     public let retentionInterval: TimeInterval
@@ -12,22 +20,53 @@ public final class AutoVolumeLogger {
     private let lock = NSLock()
     private let calendar = ISO8601DateFormatter()
 
+    public static let defaultAppSupportDirectory: URL = FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        .first!
+        .appendingPathComponent("AutoVolume", isDirectory: true)
+
     public init(
         directory: URL? = nil,
-        retentionInterval: TimeInterval = 24 * 60 * 60,
+        fileName: String = "AutoVolume.log",
+        retentionInterval: TimeInterval = 7 * 24 * 60 * 60,
         maxBytes: Int = 10 * 1024 * 1024,
-        settingsStore: AppSettingsStore? = nil
+        settingsStore: AppSettingsStore? = nil,
+        settingsDirectory: URL? = nil
     ) {
-        let baseDirectory = directory ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("AutoVolume", isDirectory: true)
-        self.logFileURL = baseDirectory.appendingPathComponent("AutoVolume.log")
+        let appSupportDirectory = settingsDirectory ?? Self.defaultAppSupportDirectory
+        let logsDirectory = directory ?? appSupportDirectory.appendingPathComponent("Logs", isDirectory: true)
+        self.logFileURL = logsDirectory.appendingPathComponent(fileName)
         self.retentionInterval = retentionInterval
         self.maxBytes = maxBytes
-        self.settingsStore = settingsStore ?? JSONAppSettingsStore(directory: baseDirectory)
+        self.settingsStore = settingsStore ?? JSONAppSettingsStore(directory: appSupportDirectory)
         calendar.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         calendar.timeZone = .current
+    }
+
+    /// If `<appSupportDirectory>/AutoVolume.log` (the pre-Logs-directory layout) exists
+    /// and `Logs/AutoVolume.log` does not, moves the legacy file into `Logs/` and removes
+    /// its old lock file. Never loses or duplicates content: if the move fails for any
+    /// reason, logging simply continues at the new location and the old file is left in
+    /// place rather than risking data loss. Must be called once at process start, before
+    /// the first log line is written.
+    public static func migrateLegacyLogIfNeeded(appSupportDirectory: URL = AutoVolumeLogger.defaultAppSupportDirectory) {
+        let legacyLogURL = appSupportDirectory.appendingPathComponent("AutoVolume.log")
+        let legacyLockURL = appSupportDirectory.appendingPathComponent(".AutoVolume.log.lock")
+        let logsDirectory = appSupportDirectory.appendingPathComponent("Logs", isDirectory: true)
+        let newLogURL = logsDirectory.appendingPathComponent("AutoVolume.log")
+
+        guard FileManager.default.fileExists(atPath: legacyLogURL.path),
+              !FileManager.default.fileExists(atPath: newLogURL.path) else {
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: legacyLogURL, to: newLogURL)
+            try? FileManager.default.removeItem(at: legacyLockURL)
+        } catch {
+            fputs("AutoVolume log migration error: \(error)\n", stderr)
+        }
     }
 
     public var logDirectoryURL: URL {
@@ -94,7 +133,7 @@ public final class AutoVolumeLogger {
     }
 
     private func withInterprocessLock<T>(_ operation: () throws -> T) throws -> T {
-        let lockURL = logDirectoryURL.appendingPathComponent(".AutoVolume.log.lock")
+        let lockURL = logDirectoryURL.appendingPathComponent(".\(logFileURL.lastPathComponent).lock")
         let fd = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard fd >= 0 else { return try operation() }
         defer { close(fd) }
