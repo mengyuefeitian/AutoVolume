@@ -23,6 +23,14 @@ let mountPlanner = MountPlanner()
 var scheduler = CheckScheduler()
 let alertStore = AlertStore()
 var networkFailedVolumeIDs = Set<UUID>()
+/// Guards `runCheckCycle` against overlapping runs: the periodic 60s timer and the real-time
+/// watchers added in later tasks all funnel through the same entry point, and a check pass can
+/// take several seconds (each unreachable volume's connectivity test has its own multi-second
+/// timeout). If a trigger arrives while a pass is already running, it's recorded here instead
+/// of starting a second concurrent pass; the in-flight pass re-runs once more immediately after
+/// finishing if this is set, so nothing is silently dropped.
+var isCheckingVolumes = false
+var checkVolumesAgainAfter = false
 
 let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
 let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
@@ -103,26 +111,17 @@ func startNTFSDiskWatcher() {
 
 startNTFSDiskWatcher()
 
-func runOnce() {
-    guard appSessionIsActive() else {
-        AutoVolumeLogger.shared.info("Agent session is inactive; cleaning up")
-        cleanupOrphanedLaunchAgent()
-        exit(0)
-    }
-
-    let configs: [VolumeConfig]
-    do {
-        configs = try store.load()
-    } catch {
-        AutoVolumeLogger.shared.error("Agent config load error: \(error.localizedDescription)")
-        fputs("AutoVolumeAgent config error: \(error)\n", stderr)
-        return
-    }
-
-    let now = Date()
+/// The actual per-volume check/reconnect/alert body, unchanged from the original `runOnce()`
+/// except for the `bypassSchedule` guard added below. Called by both the periodic timer path
+/// and the real-time event-triggered path (Tasks 4–6) — everything downstream of this function
+/// (AgentEngine, MountPlanner, ConnectivityTester, alerts) is identical either way; only whether
+/// `CheckScheduler.isDue` gates each volume differs.
+func checkVolumes(configs: [VolumeConfig], now: Date, bypassSchedule: Bool) {
     for config in configs where config.isEnabled {
-        guard scheduler.isDue(volumeID: config.id, interval: config.checkIntervalSeconds, now: now) else {
-            continue
+        if !bypassSchedule {
+            guard scheduler.isDue(volumeID: config.id, interval: config.checkIntervalSeconds, now: now) else {
+                continue
+            }
         }
 
         do {
@@ -176,6 +175,67 @@ func runOnce() {
             fputs("AutoVolumeAgent mount error for \(config.name): \(message)\n", stderr)
         }
     }
+}
+
+/// Loads the current config and runs one `checkVolumes` pass. Also re-syncs which server
+/// hosts `serverReachabilityWatcher` (Task 5) should be watching, since the volume list can
+/// change between calls (added/edited/removed) and this is the one place both the periodic
+/// and real-time paths always pass through.
+func performCheckCycle(bypassSchedule: Bool) {
+    let configs: [VolumeConfig]
+    do {
+        configs = try store.load()
+    } catch {
+        AutoVolumeLogger.shared.error("Agent config load error: \(error.localizedDescription)")
+        fputs("AutoVolumeAgent config error: \(error)\n", stderr)
+        return
+    }
+    checkVolumes(configs: configs, now: Date(), bypassSchedule: bypassSchedule)
+}
+
+/// Shared entry point for both the periodic timer and the real-time watchers. Coalesces
+/// overlapping triggers (see `isCheckingVolumes` above) and reproduces the original
+/// `runOnce()`'s session-inactive handling exactly, but *only* on the periodic path
+/// (`bypassSchedule == false`) — a stray real-time event must never itself clean up the
+/// LaunchAgent and exit the process; that stays exclusive to the periodic tick, matching the
+/// original behavior.
+func runCheckCycle(bypassSchedule: Bool, reason: String?) {
+    guard appSessionIsActive() else {
+        if !bypassSchedule {
+            AutoVolumeLogger.shared.info("Agent session is inactive; cleaning up")
+            cleanupOrphanedLaunchAgent()
+            exit(0)
+        }
+        return
+    }
+
+    if isCheckingVolumes {
+        checkVolumesAgainAfter = true
+        return
+    }
+    isCheckingVolumes = true
+    defer { isCheckingVolumes = false }
+
+    if let reason {
+        AutoVolumeLogger.shared.info("Real-time check triggered: \(reason)")
+    }
+
+    repeat {
+        checkVolumesAgainAfter = false
+        performCheckCycle(bypassSchedule: bypassSchedule)
+    } while checkVolumesAgainAfter
+}
+
+func runOnce() {
+    runCheckCycle(bypassSchedule: false, reason: nil)
+}
+
+/// Called by the real-time watchers (Tasks 4–6) the moment they observe a change worth
+/// reacting to immediately, instead of waiting for the next 60s timer tick. `reason` is a
+/// short machine-readable tag (e.g. "network-path-changed") logged so a later read of
+/// `AutoVolume.log` can tell a real-time-triggered check apart from a routine poll.
+func checkVolumesNow(reason: String) {
+    runCheckCycle(bypassSchedule: true, reason: reason)
 }
 
 func serverReachability(_ config: VolumeConfig) throws -> ConnectivityCheckResult {
