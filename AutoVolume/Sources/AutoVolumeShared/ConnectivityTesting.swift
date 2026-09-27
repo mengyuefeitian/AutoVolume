@@ -116,7 +116,7 @@ public struct ConnectivityTester {
         return value
     }
 
-    private func hostOnly(_ server: String) -> String {
+    func hostOnly(_ server: String) -> String {
         let trimmed = server.trimmingCharacters(in: .whitespacesAndNewlines)
         if let components = URLComponents(string: trimmed), let host = components.host {
             return host

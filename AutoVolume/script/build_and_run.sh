@@ -49,6 +49,7 @@ swiftc \
   Sources/AutoVolumeShared/AgentEngine.swift \
   Sources/AutoVolumeShared/CheckScheduler.swift \
   Sources/AutoVolumeShared/ConnectivityTesting.swift \
+  Sources/AutoVolumeShared/ServerHostSet.swift \
   Sources/AutoVolumeShared/SMBPreferencesWriter.swift \
   Sources/AutoVolumeShared/AlertStore.swift \
   Sources/AutoVolumeShared/NTFSVolume.swift \

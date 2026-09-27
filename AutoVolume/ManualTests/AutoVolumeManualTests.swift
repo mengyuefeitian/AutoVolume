@@ -331,6 +331,17 @@ func testAutoVolumeLoggerWriteStaysFastAsLogGrowsOverDays() throws {
     )
 }
 
+func testServerHostSetDedupesByHostnameAndSkipsDisabled() throws {
+    let enabledA = VolumeConfig(name: "A", protocolType: .webdav, server: "https://nas.example.com:5006", remotePath: "a", username: nil, mountPoint: "/tmp/a-\(UUID().uuidString)", checkIntervalSeconds: 300, isEnabled: true)
+    let enabledB = VolumeConfig(name: "B", protocolType: .webdav, server: "https://nas.example.com:5006", remotePath: "b", username: nil, mountPoint: "/tmp/b-\(UUID().uuidString)", checkIntervalSeconds: 300, isEnabled: true)
+    let disabled = VolumeConfig(name: "C", protocolType: .smb, server: "other.example.com", remotePath: "c", username: nil, mountPoint: "/tmp/c-\(UUID().uuidString)", checkIntervalSeconds: 300, isEnabled: false)
+    let smb = VolumeConfig(name: "D", protocolType: .smb, server: "smb.example.com", remotePath: "d", username: nil, mountPoint: "/tmp/d-\(UUID().uuidString)", checkIntervalSeconds: 300, isEnabled: true)
+
+    let hosts = ServerHostSet.hosts(for: [enabledA, enabledB, disabled, smb])
+
+    try expect(hosts == Set(["nas.example.com", "smb.example.com"]), "expected deduped, enabled-only hostnames, got \(hosts)")
+}
+
 func testAgentEngineDecisions() throws {
     let testMountRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: testMountRoot) }
@@ -1635,6 +1646,7 @@ let tests: [(String, () throws -> Void)] = [
     ("PathHealthProbe", testPathHealthProbe),
     ("AutoVolumeLogger", testAutoVolumeLoggerRetentionAndSizeLimit),
     ("AutoVolumeLogger write() stays fast as log grows over days", testAutoVolumeLoggerWriteStaysFastAsLogGrowsOverDays),
+    ("ServerHostSet dedupes by hostname and skips disabled", testServerHostSetDedupesByHostnameAndSkipsDisabled),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
     ("FinderRevealPlanning", testFinderRevealPlanning),
