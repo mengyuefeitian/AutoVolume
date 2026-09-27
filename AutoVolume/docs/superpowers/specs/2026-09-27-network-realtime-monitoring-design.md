@@ -78,7 +78,7 @@ AutoVolume 目前对网络卷（SMB/WebDAV/AFP/NFS）的健康检测是纯定时
 
 ## 边界情况
 
-- **多个卷共用一台服务器**（现有配置里 `synology`/`home` 两个卷用的是同一台群晖）：`ServerHostSet.hosts` 按主机名去重，只注册一次 `SCNetworkReachability`，回调触发的 `checkVolumesNow` 会检查所有启用的卷（不做"只查这台主机对应的卷"的精确匹配，简化实现——反正 `checkVolumesNow` 一轮检查所有卷的成本很低，已挂载且健康的卷检查是轻量的 `isMounted` 本地判断，不会重复发起网络请求）。
+- **多个卷共用一台服务器**（现有配置里 `synology`/`home` 两个卷用的是同一台群晖）：`ServerHostSet.hosts` 按主机名去重，只注册一次 `SCNetworkReachability`，回调触发的 `checkVolumesNow` 会检查所有启用的卷（不做"只查这台主机对应的卷"的精确匹配，简化实现——每次触发确实会对每个启用的卷各发起一次 `serverReachability`（`curl`/`nc`）网络探测，即使该卷已挂载且健康，也不是零网络 I/O；`isCheckingVolumes` 合并守卫只是保证重叠的多次触发不会让这个成本翻倍，并不会把探测本身变成本地判断）。
 - **卷被禁用/删除**：`ServerHostSet.hosts` 只统计 `isEnabled` 的卷，下一次 `sync` 会自动注销不再需要的主机监听。
 - **网络抖动导致事件密集触发**：`checkVolumesNow` 的"正在检查中/待处理"标记天然起到合并多次触发的作用，不需要额外的防抖计时器。
 - **SCNetworkReachability 注册失败**（比如主机名一时解析不了）：跳过该主机，记一条 warning 日志，该卷退化为只靠 60 秒兜底轮询检测，不影响其他卷。

@@ -29,9 +29,30 @@ var networkFailedVolumeIDs = Set<UUID>()
 /// timeout). If a trigger arrives while a pass is already running, it's recorded here instead
 /// of starting a second concurrent pass; the in-flight pass re-runs once more immediately after
 /// finishing if this is set, so nothing is silently dropped.
+///
+/// This coalescing only works because the wait inside a check pass spins the main run loop: the
+/// `curl`/`nc` connectivity probes run via `ProcessCommandRunner`, which waits on the child
+/// process with `Process.waitUntilExit()` on the main thread. That call blocks by running the
+/// current run loop in the default mode rather than truly parking the thread, which is what lets
+/// a `Timer` fire or a watcher's `DispatchQueue.main.async` block interleave mid-pass and set
+/// `checkVolumesAgainAfter` above. If `ProcessCommandRunner` ever changed to wait some other way
+/// (e.g. a semaphore that blocks without spinning the run loop), triggers arriving during a pass
+/// would queue up behind it and each run as its own separate full pass afterwards instead of
+/// coalescing into one — still correct, just less efficient.
 var isCheckingVolumes = false
 var checkVolumesAgainAfter = false
 var checkVolumesAgainAfterBypassSchedule = false
+
+/// Snapshot of `ManagedMountPoints.paths(for:planner:)`, refreshed at the end of every
+/// `performCheckCycle` while volumes are (or should be) actually mounted. `MountedVolumeWatcher`
+/// needs this because for WebDAV/AFP/NFS, the real live mount point can only be resolved via the
+/// system mount table (`SystemMountTable`) — and by the time an unmount notification fires, the
+/// volume is already gone from `mount`'s output, so a fresh lookup at that point falls back to
+/// `config.mountPoint`, which is wrong for these protocols (WebDAV mounts via `osascript` land
+/// under `/Volumes/<name>`, not at the user-configured path). Comparing against this snapshot
+/// (unioned with a fresh lookup, to still catch a volume added since the last snapshot) lets the
+/// watcher correctly recognize the volume that just disappeared.
+var lastKnownManagedMountPoints: Set<String> = []
 
 let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
 let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
@@ -122,7 +143,7 @@ let serverReachabilityWatcher = ServerReachabilityWatcher()
 let mountedVolumeWatcher = MountedVolumeWatcher()
 mountedVolumeWatcher.start(
     managedMountPoints: {
-        ManagedMountPoints.paths(for: (try? store.load()) ?? [], planner: mountPlanner)
+        lastKnownManagedMountPoints.union(ManagedMountPoints.paths(for: (try? store.load()) ?? [], planner: mountPlanner))
     },
     onUnmount: {
         checkVolumesNow(reason: "volume-unmounted")
@@ -212,6 +233,7 @@ func performCheckCycle(bypassSchedule: Bool) {
         checkVolumesNow(reason: "server-reachability-changed:\(host):\(isReachable ? "reachable" : "unreachable")")
     }
     checkVolumes(configs: configs, now: Date(), bypassSchedule: bypassSchedule)
+    lastKnownManagedMountPoints = ManagedMountPoints.paths(for: configs, planner: mountPlanner)
 }
 
 /// Shared entry point for both the periodic timer and the real-time watchers. Coalesces

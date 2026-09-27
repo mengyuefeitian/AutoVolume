@@ -1,5 +1,6 @@
 import Foundation
 import SystemConfiguration
+import AutoVolumeShared
 
 /// Wraps `SCNetworkReachability`, one ref per distinct server hostname, to signal "this
 /// specific server's reachability just changed" — covers the case where the local network
@@ -67,9 +68,16 @@ final class ServerReachabilityWatcher {
         }
 
         for host in hosts.subtracting(currentHosts) {
-            guard let ref = SCNetworkReachabilityCreateWithName(nil, host) else { continue }
+            // Registration is only added to `registrations` once callback + dispatch-queue
+            // wiring both succeed (below). If either step fails, the host is skipped and
+            // logged instead of being left half-registered in `registrations` with no working
+            // callback — a half-registration would make `sync` think the host is already
+            // watched and never retry it (e.g. a hostname that transiently fails to resolve).
+            guard let ref = SCNetworkReachabilityCreateWithName(nil, host) else {
+                AutoVolumeLogger.shared.warning("SCNetworkReachability registration failed for host \(host): could not create reachability reference")
+                continue
+            }
             let registration = Registration(host: host, ref: ref, onChange: onChange, watcher: self)
-            registrations[host] = registration
 
             let info = Unmanaged.passUnretained(registration).toOpaque()
             var context = SCNetworkReachabilityContext(version: 0, info: info, retain: nil, release: nil, copyDescription: nil)
@@ -78,8 +86,22 @@ final class ServerReachabilityWatcher {
                 let registration = Unmanaged<Registration>.fromOpaque(info).takeUnretainedValue()
                 registration.watcher?.handleFlagsChanged(flags: flags, host: registration.host, onChange: registration.onChange)
             }
-            guard SCNetworkReachabilitySetCallback(ref, callback, &context) else { continue }
-            SCNetworkReachabilitySetDispatchQueue(ref, queue)
+            guard SCNetworkReachabilitySetCallback(ref, callback, &context) else {
+                AutoVolumeLogger.shared.warning("SCNetworkReachability registration failed for host \(host): could not set callback")
+                continue
+            }
+            guard SCNetworkReachabilitySetDispatchQueue(ref, queue) else {
+                // The callback was successfully set above but the dispatch queue wasn't, so `ref`
+                // still holds a callback pointing at `info` (this local `registration`, via an
+                // unretained `Unmanaged` reference). Since we're not inserting into
+                // `registrations`, `registration` is about to be deallocated when this loop
+                // iteration ends — clear the callback first so `ref` can't later invoke it
+                // against freed memory.
+                SCNetworkReachabilitySetCallback(ref, nil, nil)
+                AutoVolumeLogger.shared.warning("SCNetworkReachability registration failed for host \(host): could not set dispatch queue")
+                continue
+            }
+            registrations[host] = registration
 
             // The callback above only fires on a *change*. Read the current flags once up
             // front so a host that's already unreachable at the moment it's first registered

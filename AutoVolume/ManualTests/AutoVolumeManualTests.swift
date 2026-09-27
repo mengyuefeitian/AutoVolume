@@ -352,8 +352,20 @@ func testManagedMountPointsUsesBackingDirectoryForSMBWithSubpath() throws {
 
     try expect(!paths.contains(smbWithSubpath.mountPoint), "SMB-with-subpath's symlink path must not be treated as the real mount point")
     try expect(paths.contains(planner.effectiveMountPoint(for: smbWithSubpath)), "must use the real backing directory for SMB-with-subpath")
-    try expect(paths.contains(webdav.mountPoint), "webdav has no symlink indirection, so its configured mountPoint IS the real mount point")
+    try expect(paths.contains(webdav.mountPoint), "with no live mount table entry, webdav falls back to config.mountPoint (no symlink indirection like SMB-with-subpath has)")
     try expect(paths.count == 2, "disabled volume must be excluded, got \(paths)")
+}
+
+func testManagedMountPointsUsesLiveMountTableForWebDAV() throws {
+    let webdav = VolumeConfig(name: "home", protocolType: .webdav, server: "https://nas.example.com:5006", remotePath: "home", username: nil, mountPoint: "/Users/xiaoan/Volumes/home", checkIntervalSeconds: 300, isEnabled: true)
+    let fakeMountOutput = "https://nas.example.com:5006/home/ on /Volumes/home (webdav, nodev, noexec, nosuid, mounted by xiaoan)\n"
+    let mountTable = SystemMountTable(mountOutput: fakeMountOutput)
+    let planner = MountPlanner()
+
+    let paths = ManagedMountPoints.paths(for: [webdav], planner: planner, mountTable: mountTable)
+
+    try expect(paths.contains("/Volumes/home"), "should resolve to the live osascript-mounted path from the system mount table, not config.mountPoint")
+    try expect(!paths.contains(webdav.mountPoint), "config.mountPoint (\(webdav.mountPoint)) is not where WebDAV actually gets mounted — this is exactly the bug the final review caught")
 }
 
 func testAgentEngineDecisions() throws {
@@ -1737,7 +1749,8 @@ let tests: [(String, () throws -> Void)] = [
     ("AppSettings.updating preserves language when changing unrelated field", testAppSettingsUpdatingPreservesLanguageWhenChangingUnrelatedField),
     ("AppSettings.updating can change language directly", testAppSettingsUpdatingCanChangeLanguageDirectly),
     ("localizationFolderCandidates for each resolved language", testLocalizationFolderCandidatesForEachResolvedLanguage),
-    ("ManagedMountPoints uses backing directory for SMB with subpath", testManagedMountPointsUsesBackingDirectoryForSMBWithSubpath)
+    ("ManagedMountPoints uses backing directory for SMB with subpath", testManagedMountPointsUsesBackingDirectoryForSMBWithSubpath),
+    ("ManagedMountPoints uses live mount table for WebDAV", testManagedMountPointsUsesLiveMountTableForWebDAV)
 ]
 
 do {
