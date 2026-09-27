@@ -45,12 +45,25 @@ final class ServerReachabilityWatcher {
     /// practice); already-registered hosts keep whichever `onChange` they were created with.
     func sync(hosts: Set<String>, onChange: @escaping (String, Bool) -> Void) {
         let currentHosts = Set(registrations.keys)
+        let removedHosts = currentHosts.subtracting(hosts)
 
-        for host in currentHosts.subtracting(hosts) {
+        for host in removedHosts {
             if let registration = registrations.removeValue(forKey: host) {
                 SCNetworkReachabilitySetCallback(registration.ref, nil, nil)
                 SCNetworkReachabilitySetDispatchQueue(registration.ref, nil)
             }
+        }
+
+        if !removedHosts.isEmpty {
+            // `Registration`'s only strong owner is `registrations`; the callback's `info`
+            // pointer is `Unmanaged.passUnretained` (no retain), so a callback for a
+            // just-removed host still in flight on `queue` at this point would dereference
+            // freed memory once `removeValue` above drops the last strong reference. `queue`
+            // is the single serial queue every registration's callback runs on, so
+            // synchronously draining it here guarantees any callback already dispatched
+            // before the unregister calls above has finished running before we return — no
+            // callback for a removed host can still be in flight after this line.
+            queue.sync {}
         }
 
         for host in hosts.subtracting(currentHosts) {
