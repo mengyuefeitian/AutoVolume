@@ -112,6 +112,11 @@ func startNTFSDiskWatcher() {
 
 startNTFSDiskWatcher()
 
+let networkPathWatcher = NetworkPathWatcher()
+networkPathWatcher.start {
+    checkVolumesNow(reason: "network-path-changed")
+}
+
 /// The actual per-volume check/reconnect/alert body, unchanged from the original `runOnce()`
 /// except for the `bypassSchedule` guard added below. Called by both the periodic timer path
 /// and the real-time event-triggered path (Tasks 4–6) — everything downstream of this function

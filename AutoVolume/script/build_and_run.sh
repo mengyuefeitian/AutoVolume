@@ -81,9 +81,11 @@ swiftc \
   -L "$BUILD/shared" \
   -lAutoVolumeShared \
   -framework DiskArbitration \
+  -framework Network \
   -Xlinker -rpath \
   -Xlinker @executable_path/../Frameworks \
   -o "$BUILD/AutoVolumeAgent" \
+  Sources/AutoVolumeAgent/NetworkPathWatcher.swift \
   Sources/AutoVolumeAgent/main.swift
 
 swiftc \
