@@ -1,5 +1,10 @@
 import Foundation
 import CryptoKit
+// Security is imported for ONE thing only: SecRandomCopyBytes, the CSPRNG used
+// to generate salts and nonces a few lines below. It is NOT the Keychain.
+// This project deliberately stores credentials in an encrypted local file and
+// must never depend on macOS Keychain — no SecItemAdd, no SecItemCopyMatching,
+// no kSecClass*, ever. script/check_no_keychain.sh enforces that at build time.
 import Security
 
 public protocol CredentialStore {

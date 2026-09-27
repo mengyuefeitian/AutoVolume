@@ -1,5 +1,22 @@
 # AutoVolume Project Rules
 
+## 铁律 / HARD RULE — 永远不要使用 macOS 钥匙串（Keychain）
+
+> **本项目禁止使用 Apple 钥匙串，任何情况下都不行。没有例外，没有"这样更方便"的折中。**
+
+凭据一律存 `EncryptedFileCredentialStore`（`Sources/AutoVolumeShared/CredentialStore.swift`）：用户拥有的本地加密文件，盐 + AES-GCM。
+
+禁止出现：
+
+- 任何 Keychain API —— `SecItemAdd`、`SecItemCopyMatching`、`SecItemUpdate`、`SecItemDelete`、`SecKeychain*`、`SecAccessControl`、`kSecClass*`、`kSecAttrService`、`kSecAttrAccount`
+- 通过 `Process`/shell 调用 `security` 命令行工具
+
+**唯一允许的例外**：`import Security` 仅用于 `SecRandomCopyBytes`（CSPRNG，生成盐和 nonce）。这是随机数发生器，不是钥匙串。不要因为这个 import 存在就以为可以用钥匙串。
+
+**为什么**：钥匙串会在不可预期的时刻弹授权框；且本应用实际运行在三种完全不同的上下文里（菜单栏 App、LaunchAgent、特权 LaunchDaemon），钥匙串在这些上下文中的行为不一致；它还会把用户的 NAS 密码放进一个应用无法推理、无法迁移的地方。
+
+**强制方式**：`script/check_no_keychain.sh` 在 `build_and_run.sh` 最前面运行（编译之前，失败成本一秒）。它会剥离注释后再扫描——说明文字里提到禁用符号不算违规。该门禁自身由 `script/tests/test_check_no_keychain.sh` 测试。
+
 ## Build environment note (Swift toolchain / SDK)
 
 On this machine, the default `swiftc` (installed via `swiftly`, Swift 6.3.3) fails to compile any multi-file target that imports Foundation when paired with the default `MacOSX.sdk` (`MacOSX27.0.sdk`) — it hits a reproducible `error: unknown argument: '-target-arch-variant'` inside the ClangImporter's Foundation module build. This reproduces identically on Swift 6.2.4 and 6.3.3, and is specific to SDK 27.0 (confirmed via minimal repro: 2+ Swift files each importing Foundation, `-emit-module`, any SDK-27.0-based invocation). The older `MacOSX26.5.sdk` (also shipped under `/Library/Developer/CommandLineTools/SDKs/`) does not have this bug.

@@ -22,6 +22,10 @@ APP="$ROOT/dist/AutoVolume.app"
 
 cd "$ROOT"
 
+# Credentials live in an encrypted local file, never in macOS Keychain. Checked
+# before any compiling so a mistake costs a second, not a full build.
+"$ROOT/script/check_no_keychain.sh"
+
 # arm64 stays on the historical flat Resources/NTFSDriver layout; x86_64 and any
 # future arch keep their driver in a per-arch subdirectory.
 if [[ "$TARGET_ARCH" == "arm64" ]]; then

@@ -170,7 +170,7 @@ public final class AppViewModel {
     }
 
     /// Deletes the volume, then refreshes alerts/statuses off-main. `delete(_:)` itself is
-    /// cheap (JSON + keychain writes), but the follow-up status refresh probes every
+    /// cheap (JSON + one encrypted-file credential write), but the follow-up status refresh probes every
     /// remaining volume's mount health (subprocess calls with multi-second timeouts) and
     /// must never run on the main thread — see `refreshVolumeStatusesAsync()`.
     @MainActor
