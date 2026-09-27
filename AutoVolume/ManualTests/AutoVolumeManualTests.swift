@@ -325,9 +325,31 @@ func testAutoVolumeLoggerWriteStaysFastAsLogGrowsOverDays() throws {
     logger.write(level: "INFO", message: "Opened settings", date: now)
     let elapsed = Date().timeIntervalSince(start)
 
+    // The first write() on a logger always runs one full prune — `lastAutoPruneDate`
+    // starts nil — so this call legitimately pays a single O(n) pass over the whole
+    // file. That is the price of the 60s throttle, not the regression being guarded
+    // against; the regression was paying it on *every* line.
+    //
+    // The ceiling therefore only needs to bound one pass, and 0.3s sat directly on
+    // the measured cost (0.28–0.32s on 6000 lines), so it flipped pass/fail at random
+    // on a loaded machine. 1.0s keeps ~3x headroom for a busy disk while still failing
+    // loudly on a real regression — re-parsing all of history per line costs orders of
+    // magnitude more than this, so the guard is not weakened in any way that matters.
     try expect(
-        elapsed < 0.3,
+        elapsed < 1.0,
         "A single write() call took \(elapsed)s against a \(seededLineCount)-line log — cost must not scale with total accumulated log history"
+    )
+
+    // The actual property under test: the throttle has to hold, so a second write
+    // inside the 60s window must not pay for another prune. This is a ratio between
+    // two calls measured milliseconds apart on the same machine, so unlike the
+    // absolute ceiling above it is not sensitive to system load.
+    let secondStart = Date()
+    logger.write(level: "INFO", message: "Opened settings again", date: now.addingTimeInterval(1))
+    let secondElapsed = Date().timeIntervalSince(secondStart)
+    try expect(
+        secondElapsed < elapsed / 2.0,
+        "Second write() took \(secondElapsed)s vs \(elapsed)s for the first — the 60s auto-prune throttle is not holding, so cost still scales with log history"
     )
 }
 

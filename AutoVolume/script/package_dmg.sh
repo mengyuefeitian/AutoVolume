@@ -4,10 +4,24 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/dist/AutoVolume.app"
 VERSION="${1:?Usage: package_dmg.sh <version> (must match Info.plist CFBundleShortVersionString, optionally with a -suffix)}"
-DMG="$ROOT/dist/AutoVolume-$VERSION-local.dmg"
-RW_DMG="$ROOT/dist/AutoVolume-$VERSION-local-rw.dmg"
-STAGING="$ROOT/dist/dmg-staging"
-MOUNT_POINT="$ROOT/dist/dmg-mount"
+# Every release ships two installers, so the architecture is encoded in the
+# artifact name. TARGET_ARCH must match the arch the app bundle was built for —
+# check_binary_compat.sh (run at build time) is what guarantees that.
+#
+# arm64 ships as the plain "AutoVolume-<v>.dmg" — the historical name, and the
+# one the published download URLs already use. Only the Intel build carries an
+# explicit arch marker, as "AutoVolume-<v>-x86_64.dmg".
+ARCH="${TARGET_ARCH:-arm64}"
+case "$ARCH" in
+  arm64)  ARTIFACT_SUFFIX="" ;;
+  x86_64) ARTIFACT_SUFFIX="-x86_64" ;;
+  *) echo "error: TARGET_ARCH must be arm64 or x86_64 (got '$ARCH')" >&2; exit 1 ;;
+esac
+echo "Packaging AutoVolume $VERSION for $ARCH"
+DMG="$ROOT/dist/AutoVolume-$VERSION$ARTIFACT_SUFFIX.dmg"
+RW_DMG="$ROOT/dist/AutoVolume-$VERSION$ARTIFACT_SUFFIX-rw.dmg"
+STAGING="$ROOT/dist/dmg-staging-$ARCH"
+MOUNT_POINT="$ROOT/dist/dmg-mount-$ARCH"
 BACKGROUND="$STAGING/.background/background.png"
 ARROW_SOURCE="/Users/xiaoan/Downloads/拖入.png"
 
@@ -23,12 +37,15 @@ if [[ "$VERSION" != "$APP_VERSION" && "$VERSION" != "$APP_VERSION"-* ]]; then
   echo "error: DMG version '$VERSION' does not match the built app's version '$APP_VERSION'. Bump Resources/Info.plist and rebuild first." >&2
   exit 1
 fi
+# Collision check is per-architecture, not global: one release legitimately
+# produces AutoVolume-<v>.dmg and AutoVolume-<v>-x86_64.dmg side by side.
+# Only a same-arch collision is a hard error.
 shopt -s nullglob
-existing=("$ROOT/dist/AutoVolume-$APP_VERSION.dmg" "$ROOT"/dist/AutoVolume-"$APP_VERSION"-*.dmg)
+existing=("$DMG")
 shopt -u nullglob
 for candidate in "${existing[@]}"; do
   if [[ -e "$candidate" ]]; then
-    echo "error: a DMG for version $APP_VERSION already exists ($candidate). Never reuse or overwrite a version — bump Resources/Info.plist (patch +1, CFBundleVersion +1), rebuild, and package the new version." >&2
+    echo "error: a $ARCH DMG for version $APP_VERSION already exists ($candidate). Never reuse or overwrite a version — bump Resources/Info.plist (patch +1, CFBundleVersion +1), rebuild, and package the new version." >&2
     exit 1
   fi
 done
@@ -142,6 +159,11 @@ rm -rf "$volume_path/.fseventsd"
 chflags hidden "$volume_path/.background" >/dev/null 2>&1 || true
 SetFile -a V "$volume_path/.background" >/dev/null 2>&1 || true
 
+# Finder drives the DMG window layout (icon positions + background image).
+# It needs macOS automation permission; when that is missing, osascript fails
+# with a bare -10004 "permission violation" that is easy to misread as a
+# packaging bug, so surface the actual cause and the fix.
+set +e
 osascript <<APPLESCRIPT
 tell application "Finder"
     set volumeAlias to POSIX file "$volume_path" as alias
@@ -173,6 +195,15 @@ tell application "Finder"
     end tell
 end tell
 APPLESCRIPT
+OSA_STATUS=$?
+set -e
+if [[ "$OSA_STATUS" -ne 0 ]]; then
+  echo "error: Finder scripting failed (exit $OSA_STATUS)." >&2
+  echo "  This is almost always macOS automation permission, not a packaging bug." >&2
+  echo "  Grant it in 系统设置 → 隐私与安全性 → 自动化, allowing Finder for the app running this script (Terminal / iTerm / WorkBuddy)." >&2
+  echo "  Without it the DMG window layout (icon positions, background image) cannot be applied." >&2
+  exit 1
+fi
 
 rm -rf "$volume_path/.fseventsd"
 chflags hidden "$volume_path/.background" >/dev/null 2>&1 || true

@@ -11,7 +11,7 @@
 [![Download](https://img.shields.io/github/v/release/mengyuefeitian/AutoVolume?label=%E4%B8%8B%E8%BD%BD&style=flat-square)](https://github.com/mengyuefeitian/AutoVolume/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
 ![Requirements](https://img.shields.io/badge/macOS-14%2B-fa4e49?style=flat-square)
-![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2B-black?style=flat-square)
+![Universal](https://img.shields.io/badge/Universal-Apple%20Silicon%20%2B%20Intel-black?style=flat-square)
 [![Website](https://img.shields.io/badge/%E5%AE%98%E7%BD%91-xiaoanhome.xyz-015FBA?style=flat-square)](https://www.xiaoanhome.xyz/autovolume)
 [![License](https://img.shields.io/github/license/mengyuefeitian/AutoVolume?style=flat-square)](LICENSE)
 
@@ -48,7 +48,11 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 
 ## 📥 下载安装
 
-1. 前往 [Releases](https://github.com/mengyuefeitian/AutoVolume/releases/latest) 下载最新的 `AutoVolume-x.y.z.dmg`。
+1. 前往 [Releases](https://github.com/mengyuefeitian/AutoVolume/releases/latest) 下载最新的安装包。**请按芯片选择**：
+   - Apple 芯片（M1 及以上）→ `AutoVolume-x.y.z.dmg`
+   - Intel 芯片 → `AutoVolume-x.y.z-x86_64.dmg`
+
+   不确定自己的芯片：左上角苹果菜单 →「关于本机」，看「芯片」或「处理器」一行。
 2. 打开 DMG，把 **AutoVolume** 拖进「应用程序」文件夹。
 3. 从「应用程序」打开 AutoVolume，菜单栏会出现 AutoVolume 图标。
 
@@ -56,7 +60,9 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 
 > **从 0.1.52 及更早版本升级**：需要手动下载安装一次 0.1.53 或更新版本；之后的新版本会自动提示升级。
 
-**系统要求**：macOS 14 Sonoma 或更高版本，Apple 芯片（M1 及以上）的 Mac。
+**系统要求**：macOS 14 Sonoma 或更高版本，Apple 芯片（M1 及以上）**或 Intel 芯片**的 Mac。
+
+> **Intel 用户请注意**：Apple 已将 macOS 27 定为仅支持 Apple 芯片的版本，因此 Intel 版的最高系统为 macOS 26 Tahoe。AutoVolume 会持续提供 Intel 安装包，直到 macOS 28 正式发布为止。
 
 ## 🚀 使用方法
 

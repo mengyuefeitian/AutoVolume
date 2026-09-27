@@ -24,7 +24,30 @@ DMG_PATH="${1:?Usage: publish_release.sh <path-to-dmg>}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
 
-APPCAST_PATH="${APPCAST_PATH:-$REPO_ROOT/docs/appcast.xml}"
+# Every release ships two installers. Sparkle cannot filter enclosures by
+# architecture, so each arch gets its own feed file and the matching SUFeedURL
+# is baked into that arch's Info.plist at build time. appcast.xml stays the
+# arm64 feed: every install predating the split already points at it and must
+# keep upgrading without interruption.
+#
+# Only the Intel artifact is explicitly marked — it is named
+# AutoVolume-<v>-x86_64.dmg. The arm64 artifact keeps the plain historical
+# AutoVolume-<v>.dmg name, so anything not marked x86_64 defaults to arm64.
+# That default is also what keeps every pre-split artifact publishing to the
+# correct feed.
+case "$(basename "$DMG_PATH")" in
+  *x86_64*.dmg) DETECTED_ARCH="x86_64" ;;
+  *)            DETECTED_ARCH="arm64" ;;
+esac
+if [ -n "${APPCAST_PATH:-}" ]; then
+  : # Explicit override wins — used by tests and for manual re-publishing.
+else
+  if [ "$DETECTED_ARCH" = "x86_64" ]; then
+    APPCAST_PATH="$REPO_ROOT/docs/appcast-x86_64.xml"
+  else
+    APPCAST_PATH="$REPO_ROOT/docs/appcast.xml"
+  fi
+fi
 SPARKLE_PRIVATE_KEY_FILE="${SPARKLE_PRIVATE_KEY_FILE:-$HOME/.config/autovolume/sparkle_signing_key}"
 
 if [ ! -f "$SPARKLE_PRIVATE_KEY_FILE" ]; then
@@ -76,6 +99,18 @@ if [ ! -d "$RESOLVED_APP_BUNDLE" ]; then
   exit 1
 fi
 
+# The artifact name is only a claim — verify it against the binary actually
+# inside the DMG. Publishing an arm64 build to the Intel feed would silently
+# break updates for every Intel user.
+APP_EXECUTABLE="$RESOLVED_APP_BUNDLE/Contents/MacOS/AutoVolume"
+if [ -f "$APP_EXECUTABLE" ]; then
+  ACTUAL_ARCHS="$(lipo -archs "$APP_EXECUTABLE" 2>/dev/null || true)"
+  if [ -n "$ACTUAL_ARCHS" ] && [[ " $ACTUAL_ARCHS " != *" $DETECTED_ARCH "* ]]; then
+    echo "error: $(basename "$DMG_PATH") is named for $DETECTED_ARCH but its main executable is '$ACTUAL_ARCHS' — refusing to publish a mismatched build" >&2
+    exit 1
+  fi
+fi
+
 APP_INFO_PLIST="$RESOLVED_APP_BUNDLE/Contents/Info.plist"
 
 SHORT_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_INFO_PLIST" 2>/dev/null || true)"
@@ -111,7 +146,9 @@ fi
 # LSMinimumSystemVersion at face value — the gate fails if any binary in
 # the bundle actually needs a newer macOS than the plist promises,
 # preventing a stale/wrong value from ever reaching the appcast.
-MIN_SYSTEM_VERSION="$("$ROOT_DIR/script/check_binary_compat.sh" "$RESOLVED_APP_BUNDLE" --print-max-minos)" \
+# Must run with the artifact's architecture: the gate defaults to arm64 and
+# would otherwise reject a correct x86_64 build.
+MIN_SYSTEM_VERSION="$(TARGET_ARCH="$DETECTED_ARCH" "$ROOT_DIR/script/check_binary_compat.sh" "$RESOLVED_APP_BUNDLE" --print-max-minos)" \
   || { echo "error: check_binary_compat.sh failed — fix binary/Info.plist minos mismatch before publishing" >&2; exit 1; }
 if [ -z "$MIN_SYSTEM_VERSION" ]; then
   echo "error: check_binary_compat.sh did not print a minimum system version" >&2
