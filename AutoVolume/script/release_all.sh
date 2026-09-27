@@ -2,7 +2,7 @@
 # Builds and packages AutoVolume for both shipping architectures.
 #
 # Every release ships two installers:
-#   AutoVolume-<v>.dmg          (arm64 — the historical name, unchanged)
+#   AutoVolume-<v>-arm64.dmg    (arm64)
 #   AutoVolume-<v>-x86_64.dmg   (Intel)
 # Both are cut from the same source tree at the same version — only TARGET_ARCH
 # differs. Order matters: each architecture is built and then packaged
@@ -15,7 +15,7 @@
 #
 # To publish afterwards, sign and insert each artifact separately — they land in
 # different appcasts:
-#   script/publish_release.sh dist/AutoVolume-<v>.dmg
+#   script/publish_release.sh dist/AutoVolume-<v>-arm64.dmg
 #   script/publish_release.sh dist/AutoVolume-<v>-x86_64.dmg
 set -euo pipefail
 
@@ -56,11 +56,9 @@ for ARCH in arm64 x86_64; do
 
   echo "=== Packaging $ARCH ==="
   TARGET_ARCH="$ARCH" "$ROOT/script/package_dmg.sh" "$VERSION"
-  if [[ "$ARCH" == "x86_64" ]]; then
-    PRODUCED+=("$ROOT/dist/AutoVolume-$VERSION-x86_64.dmg")
-  else
-    PRODUCED+=("$ROOT/dist/AutoVolume-$VERSION.dmg")
-  fi
+  # The marker is taken from the architecture itself, so the two artifacts can
+  # never be named alike and neither can be mistaken for the other.
+  PRODUCED+=("$ROOT/dist/AutoVolume-$VERSION-$ARCH.dmg")
 done
 
 echo ""

@@ -8,12 +8,14 @@ VERSION="${1:?Usage: package_dmg.sh <version> (must match Info.plist CFBundleSho
 # artifact name. TARGET_ARCH must match the arch the app bundle was built for —
 # check_binary_compat.sh (run at build time) is what guarantees that.
 #
-# arm64 ships as the plain "AutoVolume-<v>.dmg" — the historical name, and the
-# one the published download URLs already use. Only the Intel build carries an
-# explicit arch marker, as "AutoVolume-<v>-x86_64.dmg".
+# Both architectures carry an explicit marker: "AutoVolume-<v>-arm64.dmg" and
+# "AutoVolume-<v>-x86_64.dmg". Releases up to and including 0.1.59 shipped arm64
+# as the unmarked "AutoVolume-<v>.dmg" to keep the published download URLs
+# stable; those artifacts stay as they are, and publish_release.sh still routes
+# an unmarked name to the arm64 feed so a re-publish of an old build is safe.
 ARCH="${TARGET_ARCH:-arm64}"
 case "$ARCH" in
-  arm64)  ARTIFACT_SUFFIX="" ;;
+  arm64)  ARTIFACT_SUFFIX="-arm64" ;;
   x86_64) ARTIFACT_SUFFIX="-x86_64" ;;
   *) echo "error: TARGET_ARCH must be arm64 or x86_64 (got '$ARCH')" >&2; exit 1 ;;
 esac
@@ -51,7 +53,7 @@ if [[ "$VERSION" != "$APP_VERSION" && "$VERSION" != "$APP_VERSION"-* ]]; then
   exit 1
 fi
 # Collision check is per-architecture, not global: one release legitimately
-# produces AutoVolume-<v>.dmg and AutoVolume-<v>-x86_64.dmg side by side.
+# produces AutoVolume-<v>-arm64.dmg and AutoVolume-<v>-x86_64.dmg side by side.
 # Only a same-arch collision is a hard error.
 shopt -s nullglob
 existing=("$DMG")

@@ -33,7 +33,7 @@
 └────────────────────────────────────────────┘
             ↓
 ┌─ 分发层（双产物 + 双 feed）──────────────────┐
-│  AutoVolume-<v>.dmg          → appcast.xml     │
+│  AutoVolume-<v>-arm64.dmg    → appcast.xml     │
 │  AutoVolume-<v>-x86_64.dmg   → appcast-x86_64  │
 └────────────────────────────────────────────┘
 ```
@@ -91,10 +91,10 @@ fallback 到 arm64 是刻意的：历史产物（`AutoVolume-0.1.58-local.dmg` �
 
 | 架构 | 产物名 |
 |---|---|
-| arm64 | `AutoVolume-<v>.dmg` |
+| arm64 | `AutoVolume-<v>-arm64.dmg` |
 | x86_64 | `AutoVolume-<v>-x86_64.dmg` |
 
-arm64 不带标记是**安全的**（feed 判定有 fallback），且与早期 `AutoVolume-0.1.53.dmg` 一致，已发布的下载 URL 继续有效。
+**2026-09-28 更新（用户决定）**：两个架构都带显式标记，不再有"无标记=arm64"的默认形态。0.1.59 及更早的 arm64 产物当时是无标记的 `AutoVolume-<v>.dmg`（为了不动已发布的下载 URL），**这些存量产物与 appcast 条目保持原样**——重命名已发布的资产会让存量用户的下载链接和 Sparkle 更新失效。`publish_release.sh` 因此保留"无标记 → arm64"的 fallback，重发旧包依然安全。
 
 ### 3.4 DMG 窗口布局不再依赖 Finder
 

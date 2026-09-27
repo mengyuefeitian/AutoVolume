@@ -59,8 +59,8 @@ After finishing any code change in this project (including small/intermediate it
 1. **Bump the version** in `Resources/Info.plist`:
    - `CFBundleShortVersionString`: increment the patch number (e.g. `0.1.45` → `0.1.46`)
    - `CFBundleVersion`: match the new patch number as a plain integer (e.g. `46`)
-2. **Build and package both architectures**: run `script/release_all.sh <version>` (e.g. `script/release_all.sh 0.1.46`), matching the version bumped in step 1. It pins `SDKROOT`/`MACOSX_DEPLOYMENT_TARGET` internally, then builds arm64 and x86_64 in turn, **packaging each immediately** — both architectures write to the same `dist/AutoVolume.app`, so build and package must stay paired or one arch's bundle will be sealed into the other arch's DMG. Produces `dist/AutoVolume-<v>.dmg` (arm64) and `dist/AutoVolume-<v>-x86_64.dmg` (Intel). All manual tests must pass for each architecture.
-4. **Hand back to the user for self-testing**: tell the user the new DMG paths (`dist/AutoVolume-<version>.dmg` and `dist/AutoVolume-<version>-x86_64.dmg`) and ask them to test them themselves before it's considered done. Do not mark the task complete on your own say-so — this step exists because compile/tests passing does not prove the feature behaves correctly in the running app.
+2. **Build and package both architectures**: run `script/release_all.sh <version>` (e.g. `script/release_all.sh 0.1.46`), matching the version bumped in step 1. It pins `SDKROOT`/`MACOSX_DEPLOYMENT_TARGET` internally, then builds arm64 and x86_64 in turn, **packaging each immediately** — both architectures write to the same `dist/AutoVolume.app`, so build and package must stay paired or one arch's bundle will be sealed into the other arch's DMG. Produces `dist/AutoVolume-<v>-arm64.dmg` and `dist/AutoVolume-<v>-x86_64.dmg` (Intel). All manual tests must pass for each architecture.
+4. **Hand back to the user for self-testing**: tell the user the new DMG paths (`dist/AutoVolume-<version>-arm64.dmg` and `dist/AutoVolume-<version>-x86_64.dmg`) and ask them to test them themselves before it's considered done. Do not mark the task complete on your own say-so — this step exists because compile/tests passing does not prove the feature behaves correctly in the running app.
 
 This applies automatically without the user needing to ask each time — it mirrors the workflow this project used with Codex previously. Skip this only if the user explicitly says not to (e.g. "don't package this, just show me the diff").
 
@@ -68,9 +68,9 @@ This applies automatically without the user needing to ask each time — it mirr
 
 ## Dual-architecture releases (arm64 + x86_64)
 
-Every release ships **two installers** — `AutoVolume-<v>.dmg` (arm64) and `AutoVolume-<v>-x86_64.dmg` (Intel) — cut from the same source at the same version. This continues until macOS 28 ships, after which Intel support is dropped.
+Every release ships **two installers** — `AutoVolume-<v>-arm64.dmg` (arm64) and `AutoVolume-<v>-x86_64.dmg` (Intel) — cut from the same source at the same version. This continues until macOS 28 ships, after which Intel support is dropped.
 
-Only Intel is explicitly marked. arm64 keeps the plain `AutoVolume-<v>.dmg` name used by every pre-0.1.59 release, so published download URLs and appcast entries keep resolving without a rename.
+**Both architectures carry an explicit marker** (from 0.1.60 on). arm64 used to ship unmarked as `AutoVolume-<v>.dmg`; those already-published artifacts and their appcast entries are left untouched — renaming a released asset would break download URLs for everyone on it. `publish_release.sh` keeps an unmarked → arm64 fallback so re-publishing an old build still lands in the right feed.
 
 - **`TARGET_ARCH`** (`arm64` | `x86_64`, default `arm64`) drives every script: `build_and_run.sh`, `build_ntfs3g.sh`, `check_binary_compat.sh`, `package_dmg.sh`. `build_and_run.sh` exports it, so the shell test suites inherit the architecture being built — their fixtures compile for `TARGET_ARCH` too.
 - **Two Sparkle feeds.** Sparkle cannot filter enclosures by architecture, so each arch has its own feed and the matching `SUFeedURL` is baked into that arch's Info.plist at build time:

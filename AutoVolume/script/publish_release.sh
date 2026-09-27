@@ -30,13 +30,14 @@ REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
 # arm64 feed: every install predating the split already points at it and must
 # keep upgrading without interruption.
 #
-# Only the Intel artifact is explicitly marked — it is named
-# AutoVolume-<v>-x86_64.dmg. The arm64 artifact keeps the plain historical
-# AutoVolume-<v>.dmg name, so anything not marked x86_64 defaults to arm64.
-# That default is also what keeps every pre-split artifact publishing to the
-# correct feed.
+# Since 0.1.60 both artifacts carry an explicit marker: AutoVolume-<v>-arm64.dmg
+# and AutoVolume-<v>-x86_64.dmg. The unmarked fallback below is kept on purpose:
+# every arm64 artifact published before then was named AutoVolume-<v>.dmg, and
+# re-publishing one of those must still land in the arm64 feed rather than
+# breaking the update path for everyone already on it.
 case "$(basename "$DMG_PATH")" in
   *x86_64*.dmg) DETECTED_ARCH="x86_64" ;;
+  *-arm64*.dmg) DETECTED_ARCH="arm64" ;;
   *)            DETECTED_ARCH="arm64" ;;
 esac
 if [ -n "${APPCAST_PATH:-}" ]; then

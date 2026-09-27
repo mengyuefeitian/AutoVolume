@@ -13,14 +13,10 @@ for kv in "CFBundleShortVersionString string 0.1.50" "CFBundleVersion string 50"
 printf 'int main(void){return 0;}\n' > "$TMP/m.c"
 clang -arch "$TARGET_ARCH" -mmacosx-version-min=14.0 -o "$APPB/Contents/MacOS/AutoVolume" "$TMP/m.c"
 printf '#!/bin/bash\necho '"'"'sparkle:edSignature="SIG==" length="123"'"'"'\n' > "$TMP/sign_update"; chmod +x "$TMP/sign_update"
-# Only the Intel artifact is explicitly marked — arm64 ships as the plain
-# "AutoVolume-<v>.dmg". publish_release.sh derives the target architecture from
-# the name and refuses to publish a mismatched build.
-if [[ "$TARGET_ARCH" == "x86_64" ]]; then
-  DMG_NAME="AutoVolume-0.1.50-x86_64.dmg"
-else
-  DMG_NAME="AutoVolume-0.1.50.dmg"
-fi
+# Both artifacts carry an explicit architecture marker. publish_release.sh
+# derives the target architecture from the name and refuses to publish a
+# mismatched build.
+DMG_NAME="AutoVolume-0.1.50-$TARGET_ARCH.dmg"
 touch "$TMP/key" "$TMP/$DMG_NAME"
 cat > "$TMP/appcast.xml" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
