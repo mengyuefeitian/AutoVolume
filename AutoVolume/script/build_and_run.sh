@@ -83,11 +83,13 @@ swiftc \
   -framework DiskArbitration \
   -framework Network \
   -framework SystemConfiguration \
+  -framework AppKit \
   -Xlinker -rpath \
   -Xlinker @executable_path/../Frameworks \
   -o "$BUILD/AutoVolumeAgent" \
   Sources/AutoVolumeAgent/NetworkPathWatcher.swift \
   Sources/AutoVolumeAgent/ServerReachabilityWatcher.swift \
+  Sources/AutoVolumeAgent/MountedVolumeWatcher.swift \
   Sources/AutoVolumeAgent/main.swift
 
 swiftc \
