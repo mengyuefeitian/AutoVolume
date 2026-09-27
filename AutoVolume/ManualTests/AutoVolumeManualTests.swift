@@ -342,6 +342,20 @@ func testServerHostSetDedupesByHostnameAndSkipsDisabled() throws {
     try expect(hosts == Set(["nas.example.com", "smb.example.com"]), "expected deduped, enabled-only hostnames, got \(hosts)")
 }
 
+func testManagedMountPointsUsesBackingDirectoryForSMBWithSubpath() throws {
+    let smbWithSubpath = VolumeConfig(name: "Share", protocolType: .smb, server: "nas.local", remotePath: "share/subdir", username: nil, mountPoint: "/tmp/mount-point-\(UUID().uuidString)", checkIntervalSeconds: 300, isEnabled: true)
+    let webdav = VolumeConfig(name: "WebDAV", protocolType: .webdav, server: "nas.local", remotePath: "docs", username: nil, mountPoint: "/tmp/webdav-\(UUID().uuidString)", checkIntervalSeconds: 300, isEnabled: true)
+    let disabled = VolumeConfig(name: "Off", protocolType: .webdav, server: "nas.local", remotePath: "off", username: nil, mountPoint: "/tmp/off-\(UUID().uuidString)", checkIntervalSeconds: 300, isEnabled: false)
+
+    let planner = MountPlanner()
+    let paths = ManagedMountPoints.paths(for: [smbWithSubpath, webdav, disabled], planner: planner)
+
+    try expect(!paths.contains(smbWithSubpath.mountPoint), "SMB-with-subpath's symlink path must not be treated as the real mount point")
+    try expect(paths.contains(planner.effectiveMountPoint(for: smbWithSubpath)), "must use the real backing directory for SMB-with-subpath")
+    try expect(paths.contains(webdav.mountPoint), "webdav has no symlink indirection, so its configured mountPoint IS the real mount point")
+    try expect(paths.count == 2, "disabled volume must be excluded, got \(paths)")
+}
+
 func testAgentEngineDecisions() throws {
     let testMountRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: testMountRoot) }
@@ -1722,7 +1736,8 @@ let tests: [(String, () throws -> Void)] = [
     ("LanguageMigration returns nil when language already present", testLanguageMigrationReturnsNilWhenLanguageWasAlreadyPresent),
     ("AppSettings.updating preserves language when changing unrelated field", testAppSettingsUpdatingPreservesLanguageWhenChangingUnrelatedField),
     ("AppSettings.updating can change language directly", testAppSettingsUpdatingCanChangeLanguageDirectly),
-    ("localizationFolderCandidates for each resolved language", testLocalizationFolderCandidatesForEachResolvedLanguage)
+    ("localizationFolderCandidates for each resolved language", testLocalizationFolderCandidatesForEachResolvedLanguage),
+    ("ManagedMountPoints uses backing directory for SMB with subpath", testManagedMountPointsUsesBackingDirectoryForSMBWithSubpath)
 ]
 
 do {
