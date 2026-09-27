@@ -15,7 +15,27 @@
 
 **为什么**：钥匙串会在不可预期的时刻弹授权框；且本应用实际运行在三种完全不同的上下文里（菜单栏 App、LaunchAgent、特权 LaunchDaemon），钥匙串在这些上下文中的行为不一致；它还会把用户的 NAS 密码放进一个应用无法推理、无法迁移的地方。
 
-**强制方式**：`script/check_no_keychain.sh` 在 `build_and_run.sh` 最前面运行（编译之前，失败成本一秒）。它会剥离注释后再扫描——说明文字里提到禁用符号不算违规。该门禁自身由 `script/tests/test_check_no_keychain.sh` 测试。
+**强制方式**：`script/check_no_keychain.sh` 在 `build_and_run.sh` 最前面运行（编译之前，失败成本一秒）。它会剥离注释后再扫描——说明文字里提到禁用符号不算违规。该门禁自身由 `script/tests/test_check_no_keychain.sh` 测试。扫描范围包含 `script/`，所以发布脚本里出现 `security` 命令同样会让构建失败。
+
+### 发布工具链（git / GitHub）同样禁止钥匙串
+
+git 默认用 `osxkeychain`、GitHub 工具默认把 token 放进钥匙串，于是每一次 `git push`、每一次 GitHub 调用都要敲门——一次发布连弹好几次。本仓库改用文件通道：
+
+- token 放在 `~/.config/autovolume/github_token`（owner-only，600），与 Sparkle 私钥同一模式，不入 git
+- `script/git_credential_file.sh` —— git credential helper，从该文件应答（`get` 有效，`store`/`erase` 直接忽略，避免凭据被重新藏到别处）
+- `script/setup_git_no_keychain.sh` —— 一键配置，**只写 `<repo>/.git/config`**，不影响机器上其他项目。它先用空值 helper 重置继承来的 `osxkeychain`：git 按 system→global→local 顺序收集 helper，不清空的话全局的 osxkeychain 会先跑并弹窗，我们的 helper 根本轮不上
+- `script/publish_release.sh` 导出 `GH_TOKEN` / `GITHUB_TOKEN` 供任何 GitHub 工具使用（文件缺失时保持不设置，让 API 调用自己报错，而不是发布中途弹框）
+
+迁移 token（这是最后一次需要钥匙串出面的操作）：
+
+```bash
+mkdir -p ~/.config/autovolume
+printf 'protocol=https\nhost=github.com\n' | git credential fill   # 取 password= 那一行
+# 或：gh auth token > ~/.config/autovolume/github_token
+chmod 600 ~/.config/autovolume/github_token
+```
+
+配置后自检：`printf 'protocol=https\nhost=github.com\n' | git credential fill` 应当立即返回 username/password 且不弹框。
 
 ## Build environment note (Swift toolchain / SDK)
 

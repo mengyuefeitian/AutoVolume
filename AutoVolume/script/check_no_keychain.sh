@@ -51,8 +51,18 @@ scan_sources() {
 
 # Shelling out to the `security` CLI is a Keychain dependency too. '#' comments
 # are stripped for the same reason as above.
+#
+# script/ is scanned as well: a release script that shells out to
+# `security find-internet-password` would put the same unpredictable dialogs
+# back into the release flow even though the app itself is clean.
+#
+# Two files are exempt because they quote the banned strings on purpose — the
+# gate's own rules, and its test, which has to embed offending samples to prove
+# the gate still detects them.
 scan_cli() {
-  find "$ROOT/Sources" "$ROOT/ManualTests" -type f \( -name '*.swift' -o -name '*.sh' \) \
+  find "$ROOT/Sources" "$ROOT/ManualTests" "$ROOT/script" -type f \
+    \( -name '*.swift' -o -name '*.sh' \) \
+    -not -name "$(basename "$0")" -not -name 'test_check_no_keychain.sh' \
     -print0 2>/dev/null |
   while IFS= read -r -d '' file; do
     awk -v file="$file" '

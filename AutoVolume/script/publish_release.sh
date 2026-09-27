@@ -50,6 +50,19 @@ else
 fi
 SPARKLE_PRIVATE_KEY_FILE="${SPARKLE_PRIVATE_KEY_FILE:-$HOME/.config/autovolume/sparkle_signing_key}"
 
+# Release tooling must not reach for the Keychain either. Anything that talks to
+# GitHub (gh, a curl against the API) resolves its token through the
+# conventional environment variables, which are fed from the same owner-only
+# file the Sparkle key lives in. Left unset when the file is absent, so a
+# machine without credentials fails at the API call rather than popping a
+# Keychain dialog halfway through a release.
+GITHUB_TOKEN_FILE="${AUTOVOLUME_GITHUB_TOKEN_FILE:-$HOME/.config/autovolume/github_token}"
+if [ -z "${GH_TOKEN:-}" ] && [ -f "$GITHUB_TOKEN_FILE" ]; then
+  GH_TOKEN="$(tr -d '[:space:]' < "$GITHUB_TOKEN_FILE")"
+  export GH_TOKEN
+  export GITHUB_TOKEN="$GH_TOKEN"
+fi
+
 if [ ! -f "$SPARKLE_PRIVATE_KEY_FILE" ]; then
   echo "error: private key file not found at $SPARKLE_PRIVATE_KEY_FILE — set SPARKLE_PRIVATE_KEY_FILE or run 'generate_keys -x <file>' first" >&2
   exit 1
