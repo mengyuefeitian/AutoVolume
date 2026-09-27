@@ -90,6 +90,7 @@ swiftc \
   Sources/AutoVolumeAgent/NetworkPathWatcher.swift \
   Sources/AutoVolumeAgent/ServerReachabilityWatcher.swift \
   Sources/AutoVolumeAgent/MountedVolumeWatcher.swift \
+  Sources/AutoVolumeAgent/ScreenUnlockWatcher.swift \
   Sources/AutoVolumeAgent/main.swift
 
 swiftc \

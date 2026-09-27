@@ -150,6 +150,11 @@ mountedVolumeWatcher.start(
     }
 )
 
+let screenUnlockWatcher = ScreenUnlockWatcher()
+screenUnlockWatcher.start {
+    checkVolumesNow(reason: "screen-unlocked")
+}
+
 /// The actual per-volume check/reconnect/alert body, unchanged from the original `runOnce()`
 /// except for the `bypassSchedule` guard added below. Called by both the periodic timer path
 /// and the real-time event-triggered path (Tasks 4–6) — everything downstream of this function
