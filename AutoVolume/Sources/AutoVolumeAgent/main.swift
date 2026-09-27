@@ -117,6 +117,8 @@ networkPathWatcher.start {
     checkVolumesNow(reason: "network-path-changed")
 }
 
+let serverReachabilityWatcher = ServerReachabilityWatcher()
+
 /// The actual per-volume check/reconnect/alert body, unchanged from the original `runOnce()`
 /// except for the `bypassSchedule` guard added below. Called by both the periodic timer path
 /// and the real-time event-triggered path (Tasks 4–6) — everything downstream of this function
@@ -195,6 +197,9 @@ func performCheckCycle(bypassSchedule: Bool) {
         AutoVolumeLogger.shared.error("Agent config load error: \(error.localizedDescription)")
         fputs("AutoVolumeAgent config error: \(error)\n", stderr)
         return
+    }
+    serverReachabilityWatcher.sync(hosts: ServerHostSet.hosts(for: configs)) { host, isReachable in
+        checkVolumesNow(reason: "server-reachability-changed:\(host):\(isReachable ? "reachable" : "unreachable")")
     }
     checkVolumes(configs: configs, now: Date(), bypassSchedule: bypassSchedule)
 }
