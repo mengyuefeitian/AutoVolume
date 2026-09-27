@@ -119,13 +119,17 @@ public struct DiagnosticsExporter {
     /// with a hard 30s timeout: a stuck or unusually large unified-log query must never
     /// block a diagnostics export indefinitely.
     private func writeUnifiedLog(window: String, to destination: URL) {
-        let predicate = #"process == "ntfs-3g" OR process BEGINS WITH "go-nfsv4" OR process == "webdavfs_agent" OR process == "NetAuthAgent" OR process == "AutoVolume" OR process == "AutoVolumeAgent""#
+        // `BEGINSWITH` is one word — NSPredicate/`log show` rejects the two-word `BEGINS WITH`
+        // with "Bad predicate" and exits immediately. That failure used to be silently
+        // swallowed (see below), so it looked like `log show` just returned nothing.
+        let predicate = #"process == "ntfs-3g" OR process BEGINSWITH "go-nfsv4" OR process == "webdavfs_agent" OR process == "NetAuthAgent" OR process == "AutoVolume" OR process == "AutoVolumeAgent""#
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
         process.arguments = ["show", "--last", window, "--style", "compact", "--predicate", predicate]
         let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
-        process.standardError = Pipe()
+        process.standardError = stderrPipe
 
         guard (try? process.run()) != nil else {
             try? "(failed to run log show)".data(using: .utf8)?.write(to: destination, options: .atomic)
@@ -139,11 +143,21 @@ public struct DiagnosticsExporter {
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeoutWorkItem)
 
-        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         timeoutWorkItem.cancel()
 
-        let text = String(data: data, encoding: .utf8) ?? ""
+        // A non-zero exit (bad predicate, `log` missing, etc.) must be visible in the exported
+        // bundle rather than silently producing an empty file that looks like "no matching
+        // log lines" — those are very different situations to diagnose from.
+        let text: String
+        if process.terminationStatus == 0 {
+            text = String(data: outData, encoding: .utf8) ?? ""
+        } else {
+            let errorText = String(data: errData, encoding: .utf8) ?? ""
+            text = "(log show exited with status \(process.terminationStatus))\n\(errorText)"
+        }
         let redacted = CommandResult.redacted(text)
         try? redacted.data(using: .utf8)?.write(to: destination, options: .atomic)
     }

@@ -1,7 +1,9 @@
 import Foundation
 import Darwin
 
-public final class AutoVolumeLogger {
+/// `@unchecked Sendable` because every mutable access (`lock`, plus the interprocess `flock`
+/// for on-disk state) is already serialized internally — see `write(level:message:date:)`.
+public final class AutoVolumeLogger: @unchecked Sendable {
     /// `Logs/AutoVolume.log`: app lifecycle, environment line, UI actions, main-thread
     /// stall watchdog, network mounts (SMB/WebDAV/AFP/NFS, both app and agent checks),
     /// and updates. Kept in one file so the stall watchdog, WebDAV phase timings, and
@@ -19,6 +21,13 @@ public final class AutoVolumeLogger {
     private let settingsStore: AppSettingsStore
     private let lock = NSLock()
     private let calendar = ISO8601DateFormatter()
+    /// Guards how often `write()` pays for the full retention/size prune (parses every
+    /// existing line's timestamp). Without this throttle, every single log line — including
+    /// ones written from the main thread (e.g. "Opened settings") or from a background timer
+    /// holding the same lock (the stall watchdog's recovery log) — re-parsed the entire
+    /// accumulated log history, so cost grew with total uptime instead of staying flat.
+    private var lastAutoPruneDate: Date?
+    private let autoPruneInterval: TimeInterval = 60
 
     public static let defaultAppSupportDirectory: URL = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -100,23 +109,29 @@ public final class AutoVolumeLogger {
         do {
             try FileManager.default.createDirectory(at: logDirectoryURL, withIntermediateDirectories: true)
             try withInterprocessLock {
-                try pruneLocked(now: date)
                 let cleanedMessage = message
                     .replacingOccurrences(of: "\r", with: " ")
                     .replacingOccurrences(of: "\n", with: " ")
                 let line = "\(calendar.string(from: date)) [\(level)] \(CommandResult.redacted(cleanedMessage))\n"
-                if let data = line.data(using: .utf8) {
-                    let existingData = (try? Data(contentsOf: logFileURL)) ?? Data()
-                    var combinedData = Data()
-                    combinedData.append(data)
-                    combinedData.append(existingData)
-                    if FileManager.default.fileExists(atPath: logFileURL.path) {
-                        try combinedData.write(to: logFileURL, options: .atomic)
-                    } else {
-                        try data.write(to: logFileURL, options: .atomic)
-                    }
+                guard let data = line.data(using: .utf8) else { return }
+
+                // Prepend the new line — the log is kept newest-first — without parsing any
+                // existing line. This is a plain byte copy, so its cost tracks the file's
+                // current size, not the number of lines it has ever held.
+                let existingData = (try? Data(contentsOf: logFileURL)) ?? Data()
+                var combinedData = Data()
+                combinedData.append(data)
+                combinedData.append(existingData)
+                try combinedData.write(to: logFileURL, options: .atomic)
+
+                // The expensive part — parsing every line's ISO8601 timestamp to enforce
+                // retention/size limits — only needs to run occasionally, not on every write.
+                if lastAutoPruneDate == nil
+                    || date.timeIntervalSince(lastAutoPruneDate!) >= autoPruneInterval
+                    || combinedData.count > maxBytes {
+                    try pruneLocked(now: date)
+                    lastAutoPruneDate = date
                 }
-                try pruneLocked(now: date)
             }
         } catch {
             fputs("AutoVolume log error: \(error)\n", stderr)
@@ -154,22 +169,14 @@ public final class AutoVolumeLogger {
             lines.removeLast()
         }
 
+        // `write()` always prepends new lines, so the file is already newest-first — no need
+        // to re-sort it here. Re-sorting used to re-parse every line's ISO8601 timestamp
+        // O(n log n) times (twice per comparison, with no memoization), which was the actual
+        // cost behind AutoVolume.log writes getting slower the longer the app ran uninterrupted.
         let cutoff = now.addingTimeInterval(-retentionInterval)
         lines = lines.filter { line in
             guard let date = datePrefix(from: line) else { return true }
             return date >= cutoff
-        }
-        lines.sort { left, right in
-            switch (datePrefix(from: left), datePrefix(from: right)) {
-            case let (leftDate?, rightDate?):
-                return leftDate > rightDate
-            case (_?, nil):
-                return true
-            case (nil, _?):
-                return false
-            case (nil, nil):
-                return false
-            }
         }
 
         var prunedData = Data(lines.joined(separator: "\n").utf8)
@@ -177,7 +184,12 @@ public final class AutoVolumeLogger {
             prunedData.append(0x0A)
         }
         if prunedData.count > maxBytes {
-            prunedData = newestPrefix(from: lines, maxBytes: maxBytes)
+            // Trim to 90% of the cap, not the cap itself: trimming to exactly `maxBytes` would
+            // put the file right back over the limit after the very next line is appended,
+            // forcing this same expensive parse-every-line prune to run on every single write
+            // once the log reaches its size cap — reintroducing the bug this method exists to
+            // avoid. Leaving headroom means dozens of writes happen before the next full prune.
+            prunedData = newestPrefix(from: lines, maxBytes: maxBytes * 9 / 10)
         }
         try prunedData.write(to: logFileURL, options: .atomic)
     }

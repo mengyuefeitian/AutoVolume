@@ -294,6 +294,43 @@ func testAutoVolumeLoggerRetentionAndSizeLimit() throws {
     try expect(size <= 160, "Logger should keep the file under the configured size limit")
 }
 
+/// Reproduces the reported "settings takes 3+ seconds to open, main-thread stalls get worse
+/// the longer AutoVolume has been running without a restart" bug. `write()` used to re-parse
+/// every existing line's ISO8601 timestamp and re-sort the whole file (twice, via a duplicated
+/// `pruneLocked` call) on every single log line, so a single call's cost scaled with the total
+/// number of lines ever logged rather than staying roughly constant. A fresh install (empty
+/// log) never showed this; it only appeared after days of accumulated "Agent check"/stall
+/// lines, which is exactly what this test seeds directly into the log file.
+func testAutoVolumeLoggerWriteStaysFastAsLogGrowsOverDays() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let logger = AutoVolumeLogger(directory: directory)
+
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = .current
+    let now = Date()
+    // Newest-first, one line every 30s reaching back ~2 days — matches how AutoVolume.log
+    // actually accumulates ("Agent check mounted" every few minutes, stall warnings, etc.)
+    // without the app ever being restarted.
+    let seededLineCount = 6000
+    let seededLines = (0..<seededLineCount).map { index -> String in
+        let date = now.addingTimeInterval(-Double(index) * 30)
+        return "\(formatter.string(from: date)) [INFO] Agent check mounted for synology"
+    }
+    try FileManager.default.createDirectory(at: logger.logDirectoryURL, withIntermediateDirectories: true)
+    try Data((seededLines.joined(separator: "\n") + "\n").utf8).write(to: logger.logFileURL)
+
+    let start = Date()
+    logger.write(level: "INFO", message: "Opened settings", date: now)
+    let elapsed = Date().timeIntervalSince(start)
+
+    try expect(
+        elapsed < 0.3,
+        "A single write() call took \(elapsed)s against a \(seededLineCount)-line log — cost must not scale with total accumulated log history"
+    )
+}
+
 func testAgentEngineDecisions() throws {
     let testMountRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: testMountRoot) }
@@ -597,6 +634,38 @@ func testDiagnosticsExporterBundlesLogsAndRedactsSecrets() throws {
     try expect(files.contains { $0.hasSuffix("environment.txt") }, "environment.txt missing")
     let bundledLog = try String(contentsOf: unzipped.appendingPathComponent(files.first { $0.hasSuffix("AutoVolume.log") }!), encoding: .utf8)
     try expect(!bundledLog.contains("hunter2"), "password leaked into diagnostics")
+}
+
+/// Reproduces "exported unified.log is always empty": the predicate baked into
+/// `writeUnifiedLog` used `BEGINS WITH` (with a space), which `/usr/bin/log show` rejects
+/// outright ("Bad predicate") on this machine's macOS version — valid NSPredicate syntax is
+/// `BEGINSWITH`, no space. The command failed near-instantly, and because `writeUnifiedLog`
+/// never checked the exit status or read stderr, the failure was silently swallowed and an
+/// empty `unified.log` got zipped up as if everything had gone fine. This runs the exporter
+/// against the real `/usr/bin/log show` (this class only ever calls the real binary — there's
+/// no injectable runner for it) with a short window and checks the predicate is at least
+/// accepted, rather than asserting on log content, which depends on what happens to be in the
+/// system log during the test run.
+func testDiagnosticsExporterUnifiedLogPredicateIsAccepted() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let appLog = root.appendingPathComponent("AutoVolume.log")
+    try "2026-09-24T10:00:00.000+08:00 [INFO] test\n".write(to: appLog, atomically: true, encoding: .utf8)
+    let exporter = DiagnosticsExporter(appLogURL: appLog,
+                                       helperLogURL: root.appendingPathComponent("missing-helper.log"),
+                                       volumesConfigURL: root.appendingPathComponent("missing-volumes.json"),
+                                       unifiedLogWindow: "1m")
+    let zip = try exporter.export(to: root)
+    let unzipped = root.appendingPathComponent("out")
+    let unzip = Process(); unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+    unzip.arguments = ["-x", "-k", zip.path, unzipped.path]; try unzip.run(); unzip.waitUntilExit()
+    let files = try FileManager.default.subpathsOfDirectory(atPath: unzipped.path)
+    guard let unifiedLogPath = files.first(where: { $0.hasSuffix("unified.log") }) else {
+        throw ManualTestFailure.failed("unified.log missing from bundle")
+    }
+    let unifiedLog = try String(contentsOf: unzipped.appendingPathComponent(unifiedLogPath), encoding: .utf8)
+    try expect(!unifiedLog.contains("Bad predicate"), "log show rejected the predicate: \(unifiedLog)")
 }
 
 func testL10nEveryKeyExistsInAllLanguages() throws {
@@ -1565,6 +1634,7 @@ let tests: [(String, () throws -> Void)] = [
     ("MountExposure", testMountExposureCreatesSubdirectoryLink),
     ("PathHealthProbe", testPathHealthProbe),
     ("AutoVolumeLogger", testAutoVolumeLoggerRetentionAndSizeLimit),
+    ("AutoVolumeLogger write() stays fast as log grows over days", testAutoVolumeLoggerWriteStaysFastAsLogGrowsOverDays),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
     ("FinderRevealPlanning", testFinderRevealPlanning),
@@ -1620,6 +1690,7 @@ let tests: [(String, () throws -> Void)] = [
     ("PhaseTimer logs each phase with operation name", testPhaseTimerLogsEachPhaseWithOperationName),
     ("DiagnosticsContext tracks current operation", testDiagnosticsContextTracksCurrentOperation),
     ("DiagnosticsExporter bundles logs and redacts secrets", testDiagnosticsExporterBundlesLogsAndRedactsSecrets),
+    ("DiagnosticsExporter unified log predicate is accepted", testDiagnosticsExporterUnifiedLogPredicateIsAccepted),
     ("MainThreadPingPong no stall when pongs arrive promptly", testMainThreadPingPongNoStallWhenPongsArrivePromptly),
     ("MainThreadPingPong reports stall once past threshold", testMainThreadPingPongReportsStallOncePastThreshold),
     ("MainThreadPingPong recovery duration measured from pingSentAt", testMainThreadPingPongRecoveryDurationMeasuredFromPingSentAt),
