@@ -31,6 +31,7 @@ var networkFailedVolumeIDs = Set<UUID>()
 /// finishing if this is set, so nothing is silently dropped.
 var isCheckingVolumes = false
 var checkVolumesAgainAfter = false
+var checkVolumesAgainAfterBypassSchedule = false
 
 let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
 let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
@@ -211,18 +212,22 @@ func runCheckCycle(bypassSchedule: Bool, reason: String?) {
 
     if isCheckingVolumes {
         checkVolumesAgainAfter = true
+        checkVolumesAgainAfterBypassSchedule = checkVolumesAgainAfterBypassSchedule || bypassSchedule
         return
     }
     isCheckingVolumes = true
     defer { isCheckingVolumes = false }
 
+    var currentBypassSchedule = bypassSchedule
     if let reason {
         AutoVolumeLogger.shared.info("Real-time check triggered: \(reason)")
     }
 
     repeat {
         checkVolumesAgainAfter = false
-        performCheckCycle(bypassSchedule: bypassSchedule)
+        performCheckCycle(bypassSchedule: currentBypassSchedule)
+        currentBypassSchedule = checkVolumesAgainAfterBypassSchedule
+        checkVolumesAgainAfterBypassSchedule = false
     } while checkVolumesAgainAfter
 }
 
@@ -233,9 +238,15 @@ func runOnce() {
 /// Called by the real-time watchers (Tasks 4–6) the moment they observe a change worth
 /// reacting to immediately, instead of waiting for the next 60s timer tick. `reason` is a
 /// short machine-readable tag (e.g. "network-path-changed") logged so a later read of
-/// `AutoVolume.log` can tell a real-time-triggered check apart from a routine poll.
+/// `AutoVolume.log` can tell a real-time-triggered check apart from a routine poll. Dispatched
+/// onto the main queue because Tasks 4-6's watchers call this from their own background
+/// dispatch queues, and the coalescing globals above (`isCheckingVolumes` etc.) are otherwise
+/// mutated only from the main-thread `Timer` path — hopping onto the main queue here keeps all
+/// access to that shared state single-threaded instead of introducing a data race.
 func checkVolumesNow(reason: String) {
-    runCheckCycle(bypassSchedule: true, reason: reason)
+    DispatchQueue.main.async {
+        runCheckCycle(bypassSchedule: true, reason: reason)
+    }
 }
 
 func serverReachability(_ config: VolumeConfig) throws -> ConnectivityCheckResult {
