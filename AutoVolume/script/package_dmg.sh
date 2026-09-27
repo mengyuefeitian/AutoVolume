@@ -24,6 +24,19 @@ STAGING="$ROOT/dist/dmg-staging-$ARCH"
 MOUNT_POINT="$ROOT/dist/dmg-mount-$ARCH"
 BACKGROUND="$STAGING/.background/background.png"
 ARROW_SOURCE="/Users/xiaoan/Downloads/拖入.png"
+# The DMG window layout (icon positions + background) is applied from a
+# committed snapshot rather than by scripting Finder. Finder automation needs a
+# macOS TCC grant that no headless CI machine can ever obtain, and relying on
+# it also made the artifact depend on which machine happened to package it.
+# The layout is a fixed design — two icons in two known places — so a snapshot
+# is both sufficient and deterministic.
+#
+# DMG_LAYOUT_MODE=finder  regenerate the layout through Finder instead
+#                         (needs automation permission).
+# DMG_SAVE_LAYOUT=1       with finder mode, write the resulting .DS_Store back
+#                         over the snapshot so future builds pick it up.
+LAYOUT_SNAPSHOT="$ROOT/Resources/DMGLayout/dmg-window-layout.dsstore"
+DMG_LAYOUT_MODE="${DMG_LAYOUT_MODE:-snapshot}"
 
 if [[ ! -d "$APP" ]]; then
   echo "Missing app bundle: $APP" >&2
@@ -59,6 +72,14 @@ done
 mkdir -p "$STAGING/.background"
 cp -R "$APP" "$STAGING/AutoVolume.app"
 /bin/ln -s /Applications "$STAGING/Applications"
+if [[ "$DMG_LAYOUT_MODE" == "snapshot" ]]; then
+  [[ -f "$LAYOUT_SNAPSHOT" ]] || {
+    echo "error: window layout snapshot missing: $LAYOUT_SNAPSHOT" >&2
+    echo "  Regenerate it with: DMG_LAYOUT_MODE=finder DMG_SAVE_LAYOUT=1 script/package_dmg.sh <version>" >&2
+    exit 1
+  }
+  cp "$LAYOUT_SNAPSHOT" "$STAGING/.DS_Store"
+fi
 cleanup() {
   for mounted_volume in /Volumes/AutoVolume*; do
     if [[ -d "$mounted_volume" ]]; then
@@ -159,10 +180,11 @@ rm -rf "$volume_path/.fseventsd"
 chflags hidden "$volume_path/.background" >/dev/null 2>&1 || true
 SetFile -a V "$volume_path/.background" >/dev/null 2>&1 || true
 
-# Finder drives the DMG window layout (icon positions + background image).
-# It needs macOS automation permission; when that is missing, osascript fails
-# with a bare -10004 "permission violation" that is easy to misread as a
-# packaging bug, so surface the actual cause and the fix.
+# Finder is only invoked when explicitly regenerating the layout. It needs macOS
+# automation permission; when that is missing osascript fails with a bare -10004
+# "permission violation" that is easy to misread as a packaging bug, so surface
+# the actual cause and the fix.
+if [[ "$DMG_LAYOUT_MODE" == "finder" ]]; then
 set +e
 osascript <<APPLESCRIPT
 tell application "Finder"
@@ -201,8 +223,13 @@ if [[ "$OSA_STATUS" -ne 0 ]]; then
   echo "error: Finder scripting failed (exit $OSA_STATUS)." >&2
   echo "  This is almost always macOS automation permission, not a packaging bug." >&2
   echo "  Grant it in 系统设置 → 隐私与安全性 → 自动化, allowing Finder for the app running this script (Terminal / iTerm / WorkBuddy)." >&2
-  echo "  Without it the DMG window layout (icon positions, background image) cannot be applied." >&2
+  echo "  The default snapshot layout needs no permission — drop DMG_LAYOUT_MODE=finder to use it." >&2
   exit 1
+fi
+if [[ "${DMG_SAVE_LAYOUT:-0}" == "1" ]]; then
+  cp "$volume_path/.DS_Store" "$LAYOUT_SNAPSHOT"
+  echo "Window layout snapshot refreshed: $LAYOUT_SNAPSHOT"
+fi
 fi
 
 rm -rf "$volume_path/.fseventsd"

@@ -2,5 +2,16 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>AutoVolume Updates (Intel x86_64)</title>
+    <item>
+      <title>Version 0.1.59</title>
+      <pubDate>Mon, 28 Sep 2026 00:28:14 +0800</pubDate>
+      <sparkle:version>59</sparkle:version>
+      <sparkle:shortVersionString>0.1.59</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/mengyuefeitian/AutoVolume/releases/download/v0.1.59/AutoVolume-0.1.59-x86_64.dmg"
+        type="application/octet-stream"
+        sparkle:edSignature="8qrQi4qDe/GHuYxxWxn4f2VIW2NpuoV0Valx5jr2lvlXM3KI72UgCnv37+hIzKJpNQm6kMX4Ro+2ZVsogvo4Cw==" length="28295632" />
+    </item>
   </channel>
 </rss>
