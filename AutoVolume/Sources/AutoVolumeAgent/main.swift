@@ -111,11 +111,12 @@ func handleDiskDescriptionIfEligible(_ disk: DADisk, event: String) {
 /// a raw blocking socket `read()`/`write()` — unlike `Process.waitUntilExit()` elsewhere in this
 /// file, a blocked socket read does not spin the run loop, so calling it directly from a
 /// DASession callback would hold the main run loop hostage for the whole multi-second mount.
-/// Field testing found `diskutil unmount` (issued by the very same mount attempt, moments later)
-/// consistently took ~11s through this path versus well under 1s run standalone — the leading
-/// theory is that with the session's run loop stuck servicing this callback, diskarbitrationd had
-/// no live client to coordinate with and fell back to its own wait before proceeding, but this
-/// hasn't been confirmed against diskarbitrationd's own logs. A serial (not concurrent)
+/// Confirmed in the field: `diskutil unmount` (issued by the very same mount attempt, moments
+/// later) consistently took ~11s through this path versus well under 1s standalone, and
+/// diskarbitrationd's own log showed a "not responding" client warning spanning that same ~11s
+/// window — with the session's run loop stuck servicing this callback, diskarbitrationd had no
+/// live client to coordinate with and fell back to its own wait before proceeding. After moving
+/// this work off the run loop, the same unmount step dropped to 250-1050ms. A serial (not concurrent)
 /// queue keeps every callback here running one at a time, in registration order, matching the
 /// single-threaded behavior `NTFSAutoMountService`'s unsynchronized state (`failedBsdNames`,
 /// the debouncer, etc.) already assumes.
