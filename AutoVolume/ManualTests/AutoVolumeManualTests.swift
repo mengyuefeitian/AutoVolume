@@ -1077,7 +1077,7 @@ func testNTFSMountedVolumesStoreAddReplacesSameBSDName() throws {
 }
 
 func testNTFSHelperRequestRoundTripsThroughJSON() throws {
-    let request = NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB")
+    let request = NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", volumeName: "USB")
 
     let encoded = try NTFSHelperWireFormat.encode(request)
     let decoded = try NTFSHelperWireFormat.decodeRequest(encoded)
@@ -1137,10 +1137,34 @@ func testNTFSMountPlannerUnmountUsesDiskutil() throws {
 func testNTFSMountPlannerMountUsesBundledNtfs3g() throws {
     let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
 
-    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB")
+    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", volumeName: nil)
 
     try expect(plan.executable == NTFSDriverPaths.ntfs3gExecutablePath, "Mount plan should invoke the installed ntfs-3g binary")
-    try expect(plan.arguments == ["/dev/disk4s1", "/Volumes/USB", "-olocal", "-oallow_other", "-oauto_xattr", "-onosuid", "-onoexec"], "Mount plan arguments did not match the researched invocation")
+    try expect(plan.arguments == ["/dev/disk4s1", "/Volumes/USB", "-olocal", "-oallow_other", "-oauto_xattr", "-onosuid", "-onoexec"], "Mount plan arguments did not match the researched invocation when no volume name is known")
+}
+
+/// Reproduces the real-world bug found while testing on macOS 27: without an explicit
+/// `-o volname=`, ntfs-3g/FUSE-T names the mount after the mount point's last path component,
+/// not the disk's actual name — happening to match today only because DiskArbitration's initial
+/// auto-mount path already used the volume's name, not because that's guaranteed. Passing the
+/// real volume name explicitly removes that fragile coincidence.
+func testNTFSMountPlannerMountSetsVolnameFromVolumeName() throws {
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+
+    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/数据", volumeName: "数据")
+
+    try expect(plan.arguments.contains("-ovolname=数据"), "Mount plan should pass the real volume name as -o volname, got \(plan.arguments)")
+}
+
+/// A comma in the volume name would otherwise be misread by libfuse's `-o` parser as the start
+/// of a second, bogus option (no escape syntax exists for commas within a single `-o` value).
+func testNTFSMountPlannerMountSanitizesCommasInVolumeName() throws {
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+
+    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/My Drive", volumeName: "My,Drive")
+
+    try expect(plan.arguments.contains("-ovolname=My_Drive"), "Comma in volume name should be sanitized, got \(plan.arguments)")
+    try expect(!plan.arguments.contains { $0.contains(",") }, "No argument should contain an unsanitized comma, got \(plan.arguments)")
 }
 
 func testNTFSDriverInstallerDetectsFUSETInstalledMarker() throws {
@@ -1486,7 +1510,7 @@ func testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest() throws 
     try expect(commandRunner.plans.count == 1, "Expected exactly the driver install command; got \(commandRunner.plans.count)")
     try expect(commandRunner.plans[0].executable == "/usr/bin/osascript", "The one command run by the Agent should be the driver install")
     try expect(helperClient.sentRequests.count == 1, "Expected exactly one mount request sent to the helper")
-    try expect(helperClient.sentRequests[0] == NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB"), "Helper request did not match expected mount request")
+    try expect(helperClient.sentRequests[0] == NTFSHelperRequest(action: .mount, devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", volumeName: "USB"), "Helper request did not match expected mount request")
     let volumes = try volumesStore.load()
     try expect(volumes.contains { $0.bsdName == "disk4s1" }, "The remounted volume should be recorded in NTFSMountedVolumesStore")
 }
@@ -1722,6 +1746,8 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSDriverPaths constants", testNTFSDriverPathsAreUnderPrivilegedHelperTools),
     ("NTFSMountPlanner unmount uses diskutil", testNTFSMountPlannerUnmountUsesDiskutil),
     ("NTFSMountPlanner mount uses bundled ntfs-3g", testNTFSMountPlannerMountUsesBundledNtfs3g),
+    ("NTFSMountPlanner mount sets volname from volumeName", testNTFSMountPlannerMountSetsVolnameFromVolumeName),
+    ("NTFSMountPlanner mount sanitizes commas in volume name", testNTFSMountPlannerMountSanitizesCommasInVolumeName),
     ("NTFSDriverInstaller detects FUSE-T installed marker", testNTFSDriverInstallerDetectsFUSETInstalledMarker),
     ("NTFSDriverInstaller detects FUSE-T missing marker", testNTFSDriverInstallerDetectsFUSETMissingMarker),
     ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),

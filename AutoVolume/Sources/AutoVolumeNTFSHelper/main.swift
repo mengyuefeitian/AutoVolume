@@ -255,7 +255,7 @@ func handle(clientSocket: Int32) {
                 return
             }
             _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
-            let mountPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint)
+            let mountPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint, volumeName: request.volumeName)
             let mountStart = DispatchTime.now().uptimeNanoseconds
             let mountResult = try commandRunner.run(mountPlan)
             let mountDurationMs = (DispatchTime.now().uptimeNanoseconds - mountStart) / 1_000_000

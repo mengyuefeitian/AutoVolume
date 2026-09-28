@@ -33,11 +33,19 @@ public struct NTFSHelperRequest: Codable, Equatable {
     public var action: NTFSHelperAction
     public var devicePath: String?
     public var mountPoint: String
+    /// The volume's own name (from DiskArbitration), passed through so the helper can pass
+    /// `-o volname=` to ntfs-3g. Without it, ntfs-3g/FUSE-T falls back to naming the mount
+    /// after the mount point's last path component — which happens to match the volume name
+    /// today only because that's what DiskArbitration used to choose the mount point in the
+    /// first place, not because it's guaranteed to. `nil` for `.unmount` requests, which don't
+    /// need it.
+    public var volumeName: String?
 
-    public init(action: NTFSHelperAction, devicePath: String? = nil, mountPoint: String) {
+    public init(action: NTFSHelperAction, devicePath: String? = nil, mountPoint: String, volumeName: String? = nil) {
         self.action = action
         self.devicePath = devicePath
         self.mountPoint = mountPoint
+        self.volumeName = volumeName
     }
 }
 

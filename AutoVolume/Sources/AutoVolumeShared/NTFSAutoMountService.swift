@@ -157,7 +157,7 @@ public final class NTFSAutoMountService {
 
         logger.info("NTFS helper request sent: device=\(devicePath) -> mountPoint=\(mountPoint)")
         let responseStart = DispatchTime.now().uptimeNanoseconds
-        var response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
+        var response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint, volumeName: volumeName))
         if !wasFullyInstalled, response.message.contains("could not connect") {
             // launchctl bootstrap returns once the job is loaded, not once the daemon has
             // created and is listening on its socket, so the very next connect attempt can
@@ -165,7 +165,7 @@ public final class NTFSAutoMountService {
             // 2.5s total) before giving up.
             for _ in 0..<5 where response.message.contains("could not connect") {
                 Thread.sleep(forTimeInterval: 0.5)
-                response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint))
+                response = helperClient.send(NTFSHelperRequest(action: .mount, devicePath: devicePath, mountPoint: mountPoint, volumeName: volumeName))
                 if response.success { break }
             }
         }
