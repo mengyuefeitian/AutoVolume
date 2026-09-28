@@ -1096,6 +1096,16 @@ func testNTFSHelperResponseRoundTripsThroughJSON() throws {
     try expect(encoded.last == 0x0A, "Encoded response must end with a newline delimiter")
 }
 
+func testNTFSHelperResponseRoundTripsRecoveredFromHibernation() throws {
+    let response = NTFSHelperResponse(success: true, message: "", recoveredFromHibernation: true)
+
+    let encoded = try NTFSHelperWireFormat.encode(response)
+    let decoded = try NTFSHelperWireFormat.decodeResponse(encoded)
+
+    try expect(decoded == response, "NTFSHelperResponse.recoveredFromHibernation did not round trip through the wire format")
+    try expect(decoded.recoveredFromHibernation, "Decoded response should preserve recoveredFromHibernation=true")
+}
+
 func testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes() throws {
     let request = NTFSHelperRequest(action: .unmount, mountPoint: "/etc/passwd")
 
@@ -1165,6 +1175,36 @@ func testNTFSMountPlannerMountSanitizesCommasInVolumeName() throws {
 
     try expect(plan.arguments.contains("-ovolname=My_Drive"), "Comma in volume name should be sanitized, got \(plan.arguments)")
     try expect(!plan.arguments.contains { $0.contains(",") }, "No argument should contain an unsanitized comma, got \(plan.arguments)")
+}
+
+func testNTFSMountPlannerMountAppendsRemoveHiberfileWhenRequested() throws {
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+
+    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", volumeName: nil, removeHiberfile: true)
+
+    try expect(plan.arguments.contains("-oremove_hiberfile"), "Retry mount should pass -o remove_hiberfile, got \(plan.arguments)")
+}
+
+func testNTFSMountPlannerMountOmitsRemoveHiberfileByDefault() throws {
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+
+    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/USB", volumeName: nil)
+
+    try expect(!plan.arguments.contains("-oremove_hiberfile"), "First mount attempt must not pre-emptively discard the hibernation file, got \(plan.arguments)")
+}
+
+/// Exit code 14 is ntfs-3g's documented `NTFS_VOLUME_HIBERNATED` (ntfs-3g.probe(8)). Matching
+/// on this exact code — not a substring of ntfs-3g's English stderr text — is what this
+/// classifier exists to centralize, so `NTFSPrivilegedHelper`'s untested glue only has to call
+/// it, not re-derive the exit code's meaning inline.
+func testNTFSMountFailureClassifierRecognizesHibernatedExitCode() throws {
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 14) == .hibernated, "Exit code 14 must classify as hibernated")
+}
+
+func testNTFSMountFailureClassifierTreatsOtherExitCodesAsOther() throws {
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 0) == .other, "Exit code 0 (success) must not classify as hibernated")
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 1) == .other, "An unrelated failure exit code must not classify as hibernated")
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 13) == .other, "Exit code 13 (not the documented hibernation code) must not classify as hibernated")
 }
 
 func testNTFSDriverInstallerDetectsFUSETInstalledMarker() throws {
@@ -1515,6 +1555,45 @@ func testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest() throws 
     try expect(volumes.contains { $0.bsdName == "disk4s1" }, "The remounted volume should be recorded in NTFSMountedVolumesStore")
 }
 
+/// When the helper's response says it had to recover from a Windows hibernation state, this
+/// is a successful mount — the volume is still recorded exactly as any other success — but the
+/// service must also surface a distinct, informational alert. Silently discarding a Windows
+/// hibernation/Fast-Startup session with no record of it would surprise a user who later can't
+/// figure out why their Windows session state disappeared.
+func testNTFSAutoMountServiceRecordsInformationalAlertWhenRecoveredFromHibernation() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let markerDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let alertsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+        try? FileManager.default.removeItem(at: volumesDirectory)
+        try? FileManager.default.removeItem(at: markerDirectory)
+        try? FileManager.default.removeItem(at: alertsDirectory)
+    }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
+    let markerPath = markerDirectory.appendingPathComponent("uninstall.sh").path
+    let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: true, recoveredFromHibernation: true))
+    let alertStore = AlertStore(directory: alertsDirectory)
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: markerPath),
+        helperClient: helperClient,
+        mountedVolumesStore: NTFSMountedVolumesStore(directory: volumesDirectory),
+        commandRunner: RecordingCommandRunner(),
+        alertStore: alertStore,
+        logger: AutoVolumeLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s1", devicePath: "/dev/disk4s1", volumeName: "USB", mountPoint: "/Volumes/USB", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+
+    let alerts = try alertStore.load()
+    let hibernationAlert = alerts.first { $0.messageKey == L10nKey.alertNTFSHibernationRecovered.rawValue }
+    try expect(hibernationAlert != nil, "Expected an informational hibernation-recovered alert; got \(alerts)")
+    try expect(hibernationAlert?.volumeName == "USB", "Hibernation-recovered alert should name the affected volume")
+}
+
 func testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails() throws {
     let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -1740,6 +1819,7 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSMountedVolumesStore replaces same bsdName", testNTFSMountedVolumesStoreAddReplacesSameBSDName),
     ("NTFSHelperRequest wire round trip", testNTFSHelperRequestRoundTripsThroughJSON),
     ("NTFSHelperResponse wire round trip", testNTFSHelperResponseRoundTripsThroughJSON),
+    ("NTFSHelperResponse wire round trip preserves recoveredFromHibernation", testNTFSHelperResponseRoundTripsRecoveredFromHibernation),
     ("NTFSHelperRequestValidator rejects outside /Volumes", testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes),
     ("NTFSHelperRequestValidator accepts /Volumes path", testNTFSHelperRequestValidatorAcceptsMountPointUnderVolumes),
     ("NTFSHelperRequestValidator rejects mount without devicePath", testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath),
@@ -1748,6 +1828,10 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSMountPlanner mount uses bundled ntfs-3g", testNTFSMountPlannerMountUsesBundledNtfs3g),
     ("NTFSMountPlanner mount sets volname from volumeName", testNTFSMountPlannerMountSetsVolnameFromVolumeName),
     ("NTFSMountPlanner mount sanitizes commas in volume name", testNTFSMountPlannerMountSanitizesCommasInVolumeName),
+    ("NTFSMountPlanner mount appends remove_hiberfile when requested", testNTFSMountPlannerMountAppendsRemoveHiberfileWhenRequested),
+    ("NTFSMountPlanner mount omits remove_hiberfile by default", testNTFSMountPlannerMountOmitsRemoveHiberfileByDefault),
+    ("NTFSMountFailureClassifier recognizes hibernated exit code", testNTFSMountFailureClassifierRecognizesHibernatedExitCode),
+    ("NTFSMountFailureClassifier treats other exit codes as other", testNTFSMountFailureClassifierTreatsOtherExitCodesAsOther),
     ("NTFSDriverInstaller detects FUSE-T installed marker", testNTFSDriverInstallerDetectsFUSETInstalledMarker),
     ("NTFSDriverInstaller detects FUSE-T missing marker", testNTFSDriverInstallerDetectsFUSETMissingMarker),
     ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),
@@ -1767,6 +1851,7 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSAutoMountService onboarding alert when disabled", testNTFSAutoMountServiceRecordsOnboardingAlertWhenSettingDisabled),
     ("NTFSAutoMountService skips already-owned mounts", testNTFSAutoMountServiceSkipsWhenAlreadyOwnedByOurDriver),
     ("NTFSAutoMountService installs driver then sends helper mount request", testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest),
+    ("NTFSAutoMountService records informational alert when recovered from hibernation", testNTFSAutoMountServiceRecordsInformationalAlertWhenRecoveredFromHibernation),
     ("NTFSAutoMountService does not record volume when helper mount fails", testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails),
     ("NTFSAutoMountService records alert and skips helper when install fails", testNTFSAutoMountServiceRecordsAlertAndSkipsHelperWhenInstallFails),
     ("NTFSAutoMountService cleans up helper and debouncer on eject", testNTFSAutoMountServiceUnmountCleansUpHelperAndDebouncerOnEject),

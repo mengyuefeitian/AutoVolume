@@ -257,16 +257,34 @@ func handle(clientSocket: Int32) {
             _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
             let mountPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint, volumeName: request.volumeName)
             let mountStart = DispatchTime.now().uptimeNanoseconds
-            let mountResult = try commandRunner.run(mountPlan)
-            let mountDurationMs = (DispatchTime.now().uptimeNanoseconds - mountStart) / 1_000_000
-            let success = mountResult.exitCode == 0
+            var mountResult = try commandRunner.run(mountPlan)
+            var mountDurationMs = (DispatchTime.now().uptimeNanoseconds - mountStart) / 1_000_000
             log("ntfs-3g args=\(mountPlan.arguments) exitCode=\(mountResult.exitCode) stdout=\(mountResult.stdout) stderr=\(mountResult.stderr) duration_ms=\(mountDurationMs)")
+
+            var recoveredFromHibernation = false
+            if NTFSMountFailureClassifier.classify(exitCode: mountResult.exitCode) == .hibernated {
+                // The failed attempt above leaves nothing mounted at `mountPoint`, but
+                // diskarbitrationd races to remount the disk read-only (via its own FSKit
+                // fallback) the moment it notices the read-write attempt let go — that read-only
+                // mount must be cleared again before retrying, or ntfs-3g finds the mount point
+                // already occupied.
+                log("ntfs-3g reported NTFS_VOLUME_HIBERNATED for \(devicePath); retrying with remove_hiberfile")
+                _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+                let retryPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint, volumeName: request.volumeName, removeHiberfile: true)
+                let retryStart = DispatchTime.now().uptimeNanoseconds
+                mountResult = try commandRunner.run(retryPlan)
+                mountDurationMs = (DispatchTime.now().uptimeNanoseconds - retryStart) / 1_000_000
+                log("ntfs-3g retry (remove_hiberfile) args=\(retryPlan.arguments) exitCode=\(mountResult.exitCode) stdout=\(mountResult.stdout) stderr=\(mountResult.stderr) duration_ms=\(mountDurationMs)")
+                recoveredFromHibernation = mountResult.exitCode == 0
+            }
+
+            let success = mountResult.exitCode == 0
             log("mount \(devicePath) -> \(mountPoint): \(success ? "success" : "failed (\(mountResult.stderr))")")
             if success {
                 mountedNTFSMountPoints.insert(mountPoint)
                 startNTFSLogStreamIfNeeded()
             }
-            respond(NTFSHelperResponse(success: success, message: mountResult.stderr), on: clientSocket)
+            respond(NTFSHelperResponse(success: success, message: mountResult.stderr, recoveredFromHibernation: recoveredFromHibernation), on: clientSocket)
         case .unmount:
             let unmountStart = DispatchTime.now().uptimeNanoseconds
             let result = try commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))

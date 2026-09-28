@@ -17,8 +17,17 @@ public struct NTFSMountPlanner {
     /// `ntfs-3g`'s `-o volname` value is passed through to the FUSE/NFS-loopback layer as-is; it
     /// isn't shell-interpreted, so no escaping is needed here (matches how `devicePath` and
     /// `mountPoint` are already passed as separate `CommandPlan` arguments, not through a shell).
-    public func mountReadWritePlan(devicePath: String, mountPoint: String, volumeName: String?) -> CommandPlan {
+    ///
+    /// `removeHiberfile` becomes `-o remove_hiberfile`, discarding a Windows hibernation file
+    /// that's blocking a read-write mount (see `NTFSMountFailureClassifier` for how the caller
+    /// decides this is needed). Defaults to `false` for the normal first attempt; the privileged
+    /// helper retries with `true` only after the first attempt fails with the documented
+    /// hibernation exit code.
+    public func mountReadWritePlan(devicePath: String, mountPoint: String, volumeName: String?, removeHiberfile: Bool = false) -> CommandPlan {
         var arguments = [devicePath, mountPoint, "-olocal", "-oallow_other", "-oauto_xattr", "-onosuid", "-onoexec"]
+        if removeHiberfile {
+            arguments.append("-oremove_hiberfile")
+        }
         // libfuse's `-o` parser splits on commas to separate multiple options within one `-o`
         // argument, with no escape syntax — a comma inside the value itself would be misread as
         // the start of a new (bogus) option. This argument is passed as its own argv element

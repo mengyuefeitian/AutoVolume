@@ -88,6 +88,7 @@ extension L10nKey {
     public static let alertNTFSOnboarding = L10nKey(rawValue: "alert.ntfs.onboarding")
     public static let alertNTFSInstallFailed = L10nKey(rawValue: "alert.ntfs.installFailed")
     public static let alertNTFSMountFailed = L10nKey(rawValue: "alert.ntfs.mountFailed")
+    public static let alertNTFSHibernationRecovered = L10nKey(rawValue: "alert.ntfs.hibernationRecovered")
 
     public static let errorConnectivityWebDAVUnauthorized = L10nKey(rawValue: "error.connectivity.webdav.unauthorized")
     public static let errorConnectivityWebDAVForbidden = L10nKey(rawValue: "error.connectivity.webdav.forbidden")

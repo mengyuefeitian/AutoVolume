@@ -61,6 +61,10 @@ public final class NTFSAutoMountService {
     /// Deterministic per-bsdName alert IDs for mount-failure alerts, so a failure on one
     /// device doesn't clobber the onboarding alert or another device's failure alert.
     private var mountFailureAlertIDs: [String: UUID] = [:]
+    /// Same purpose as `mountFailureAlertIDs`, for the hibernation-recovered notice — kept as a
+    /// separate dictionary/ID space so a device's hibernation notice can't collide with (and get
+    /// silently replaced by) a mount-failure alert for that same device, or vice versa.
+    private var hibernationRecoveredAlertIDs: [String: UUID] = [:]
 
     public init(
         settingsStore: AppSettingsStore = JSONAppSettingsStore(),
@@ -186,6 +190,20 @@ public final class NTFSAutoMountService {
         try? mountedVolumesStore.add(NTFSVolume(bsdName: bsdName, volumeName: volumeName, devicePath: devicePath, mountPoint: mountPoint, mountedAt: Date()))
         logger.info("NTFS volume recorded bsd=\(bsdName) name=\(volumeName) path=\(mountPoint)")
         try? alertStore.resolve(volumeID: Self.onboardingAlertID)
+
+        if response.recoveredFromHibernation {
+            // Informational, not a failure: the mount succeeded, but only after the helper
+            // discarded a Windows hibernation/Fast-Startup session to do it (see
+            // `NTFSMountFailureClassifier`). Surfacing this — rather than mounting silently —
+            // matters because it discarded whatever unsaved Windows session state existed.
+            logger.warning("NTFS volume bsd=\(bsdName) name=\(volumeName) recovered from Windows hibernation state to mount read-write")
+            try? alertStore.record(
+                volumeID: hibernationRecoveredAlertID(for: bsdName),
+                volumeName: volumeName,
+                key: .alertNTFSHibernationRecovered,
+                args: [volumeName]
+            )
+        }
     }
 
     public func handleDiskDisappeared(bsdName: String) {
@@ -205,6 +223,15 @@ public final class NTFSAutoMountService {
         }
         let newID = UUID()
         mountFailureAlertIDs[bsdName] = newID
+        return newID
+    }
+
+    private func hibernationRecoveredAlertID(for bsdName: String) -> UUID {
+        if let existing = hibernationRecoveredAlertIDs[bsdName] {
+            return existing
+        }
+        let newID = UUID()
+        hibernationRecoveredAlertIDs[bsdName] = newID
         return newID
     }
 }

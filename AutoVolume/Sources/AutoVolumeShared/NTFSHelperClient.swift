@@ -30,8 +30,11 @@ public struct NTFSHelperClient: NTFSHelperClientProtocol {
         // Bound the whole mount/unmount round trip: the daemon's own 5s timeout only
         // covers its per-message socket I/O, not the subprocess it runs before
         // responding, so the client needs a longer ceiling to avoid hanging forever
-        // if the daemon is slow or wedged.
-        setSocketTimeouts(clientSocket, seconds: 30)
+        // if the daemon is slow or wedged. 60s (not 30s) because a hibernated-volume
+        // mount now costs two ntfs-3g attempts back to back (~11s each observed in the
+        // field) plus two `diskutil unmount` calls in between — a tighter ceiling risks
+        // the client giving up right as the daemon's retry was about to succeed.
+        setSocketTimeouts(clientSocket, seconds: 60)
 
         // Writing to a socket whose peer has already closed its end raises SIGPIPE,
         // whose default disposition terminates the process. This is a shared library

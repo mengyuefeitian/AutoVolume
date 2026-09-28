@@ -52,10 +52,17 @@ public struct NTFSHelperRequest: Codable, Equatable {
 public struct NTFSHelperResponse: Codable, Equatable {
     public var success: Bool
     public var message: String
+    /// Set when the helper had to retry the mount with `-o remove_hiberfile` because the first
+    /// attempt failed with ntfs-3g's documented hibernation exit code (see
+    /// `NTFSMountFailureClassifier`). Lets `NTFSAutoMountService` surface a one-time,
+    /// user-facing notice explaining why a hibernation state was cleared automatically, instead
+    /// of silently discarding Windows session state with no record of it.
+    public var recoveredFromHibernation: Bool
 
-    public init(success: Bool, message: String = "") {
+    public init(success: Bool, message: String = "", recoveredFromHibernation: Bool = false) {
         self.success = success
         self.message = message
+        self.recoveredFromHibernation = recoveredFromHibernation
     }
 }
 
