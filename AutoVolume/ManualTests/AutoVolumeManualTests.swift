@@ -1661,21 +1661,38 @@ func testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails() throws {
 func testNTFSAutoMountServiceDoesNotRetryFailedVolumeUntilDiskDisappears() throws {
     let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let installStateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer {
         try? FileManager.default.removeItem(at: settingsDirectory)
         try? FileManager.default.removeItem(at: volumesDirectory)
+        try? FileManager.default.removeItem(at: installStateDirectory)
     }
+    try FileManager.default.createDirectory(at: installStateDirectory, withIntermediateDirectories: true)
+    // Simulate a driver that is already fully installed and up to date, so this test exercises
+    // only the mount-retry guard it's named for — not `hasAttemptedInstallThisSession`, a
+    // separate, session-wide guard against hammering the (mocked) installer, which is orthogonal
+    // to whether a specific bsdName should be retried after physical reinsertion.
+    let fuseTMarkerPath = installStateDirectory.appendingPathComponent("uninstall.sh").path
+    let daemonPlistPath = installStateDirectory.appendingPathComponent("daemon.plist").path
+    let versionStampPath = installStateDirectory.appendingPathComponent("installed-build").path
+    try Data().write(to: URL(fileURLWithPath: fuseTMarkerPath))
+    try Data().write(to: URL(fileURLWithPath: daemonPlistPath))
+    try "1".write(toFile: versionStampPath, atomically: true, encoding: .utf8)
+    var bundledInstallerPaths = NTFSBundledInstallerPaths()
+    bundledInstallerPaths.bundleBuild = "1"
+
     let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
     try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
     let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: false, message: "mount failed"))
     let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
     let service = NTFSAutoMountService(
         settingsStore: settingsStore,
-        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/Library/Application Support/fuse-t/uninstall.sh"),
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: fuseTMarkerPath, versionStampPath: versionStampPath, daemonPlistPath: daemonPlistPath),
         helperClient: helperClient,
         mountedVolumesStore: volumesStore,
         commandRunner: RecordingCommandRunner(),
         alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
+        bundledInstallerPaths: bundledInstallerPaths,
         logger: AutoVolumeLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
     )
 

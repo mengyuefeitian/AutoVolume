@@ -255,6 +255,12 @@ func handle(clientSocket: Int32) {
                 return
             }
             _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+            // `diskutil unmount` removes the mount point directory itself once nothing is
+            // mounted there anymore — ntfs-3g needs it to already exist. Without this, ntfs-3g
+            // (which forks and daemonizes) can hand back exit code 0 from its parent process
+            // while the actual mount silently never happens in the child, because the target
+            // directory it just tried to `chdir`/mount onto doesn't exist.
+            try? FileManager.default.createDirectory(atPath: mountPoint, withIntermediateDirectories: true)
             let mountPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint, volumeName: request.volumeName)
             let mountStart = DispatchTime.now().uptimeNanoseconds
             var mountResult = try commandRunner.run(mountPlan)
@@ -270,6 +276,7 @@ func handle(clientSocket: Int32) {
                 // already occupied.
                 log("ntfs-3g reported NTFS_VOLUME_HIBERNATED for \(devicePath); retrying with remove_hiberfile")
                 _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+                try? FileManager.default.createDirectory(atPath: mountPoint, withIntermediateDirectories: true)
                 let retryPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint, volumeName: request.volumeName, removeHiberfile: true)
                 let retryStart = DispatchTime.now().uptimeNanoseconds
                 mountResult = try commandRunner.run(retryPlan)
@@ -278,11 +285,39 @@ func handle(clientSocket: Int32) {
                 recoveredFromHibernation = mountResult.exitCode == 0
             }
 
-            let success = mountResult.exitCode == 0
+            // ntfs-3g forks and daemonizes: its own process exiting 0 only means the parent
+            // handed off to the child cleanly, not that the child actually established the
+            // mount (observed in the field: exit 0 with no mount at all, when the target
+            // directory was missing). Poll `isStillAMountPoint` briefly rather than trusting
+            // the exit code alone — the real mount, when it happens, is established well
+            // within this window in every observed case.
+            var success = mountResult.exitCode == 0
+            if success {
+                success = false
+                for _ in 0..<10 {
+                    if isStillAMountPoint(mountPoint) {
+                        success = true
+                        break
+                    }
+                    usleep(200_000)
+                }
+                if !success {
+                    log("ntfs-3g exited 0 for \(devicePath) -> \(mountPoint) but the mount never actually appeared")
+                    mountResult.stderr = "ntfs-3g reported success but the mount never appeared at \(mountPoint)"
+                }
+            }
             log("mount \(devicePath) -> \(mountPoint): \(success ? "success" : "failed (\(mountResult.stderr))")")
             if success {
                 mountedNTFSMountPoints.insert(mountPoint)
                 startNTFSLogStreamIfNeeded()
+            } else {
+                // We created this directory above (line 263/279) expecting ntfs-3g to mount onto
+                // it; if that never happened, leaving it behind means the next attempt's
+                // `diskutil unmount` at the same path has nothing to unmount, so it's skipped,
+                // and macOS's `diskutil mount` fallback then lands the read-only remount at
+                // "<name> 1" instead of reusing this path. `rmdir` is a no-op if something is
+                // actually mounted there (non-empty/busy), so this is safe either way.
+                rmdir(mountPoint)
             }
             respond(NTFSHelperResponse(success: success, message: mountResult.stderr, recoveredFromHibernation: recoveredFromHibernation), on: clientSocket)
         case .unmount:

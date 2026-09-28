@@ -20,6 +20,22 @@ echo "Building AutoVolume for $TARGET_ARCH"
 BUILD="$ROOT/.manual-build-$TARGET_ARCH"
 APP="$ROOT/dist/AutoVolume.app"
 
+# Ad-hoc signing (--sign -) gives every rebuild a fresh cdhash, which silently
+# invalidates any TCC grant (e.g. Full Disk Access for NTFSPrivilegedHelper)
+# tied to the previous build. A stable local identity keeps the cdhash — and
+# the grant — constant across rebuilds. This is a local, self-signed identity
+# created once on this machine (see docs/codesigning.md); if it's missing,
+# `codesign` below will fail loudly rather than silently falling back to
+# ad-hoc, since a silent fallback is exactly how this problem went unnoticed
+# before. Override with SIGN_IDENTITY=- to force ad-hoc on a machine that
+# doesn't have the identity (e.g. a fresh checkout that hasn't run the
+# certificate setup yet).
+#
+# (Deliberately not using `security find-identity` here — this project's hard
+# rule bans shelling out to the `security` CLI anywhere in script/, since it's
+# a Keychain dependency. See CLAUDE.md.)
+SIGN_IDENTITY="${SIGN_IDENTITY:-AutoVolume Local Signing}"
+
 cd "$ROOT"
 
 # Credentials live in an encrypted local file, never in macOS Keychain. Checked
@@ -201,18 +217,18 @@ cp "$BUILD/NTFSPrivilegedHelper" "$APP/Contents/Resources/NTFSPrivilegedHelper"
 cp "$ROOT/Resources/com.autovolume.ntfshelper.plist" "$APP/Contents/Resources/com.autovolume.ntfshelper.plist"
 cp "$ROOT/Resources/com.autovolume.ntfshelper.newsyslog.conf" "$APP/Contents/Resources/com.autovolume.ntfshelper.newsyslog.conf"
 
-codesign --force --sign - "$APP/Contents/Frameworks/libAutoVolumeShared.dylib"
-codesign --force --sign - "$APP/Contents/Resources/AutoVolumeAgent"
-codesign --force --sign - "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
-codesign --force --sign - "$APP/Contents/Resources/NTFSPrivilegedHelper"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/libAutoVolumeShared.dylib"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/AutoVolumeAgent"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/NTFSPrivilegedHelper"
 
-codesign --force --sign - "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
-codesign --force --sign - "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
-codesign --force --sign - "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
-codesign --force --sign - "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
-codesign --force --sign - "$APP/Contents/Frameworks/Sparkle.framework"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
 
-codesign --force --sign - "$APP"
+codesign --force --sign "$SIGN_IDENTITY" "$APP"
 
 "$ROOT/script/check_binary_compat.sh" "$APP"
 
