@@ -56,7 +56,11 @@ var lastKnownManagedMountPoints: Set<String> = []
 
 let agentExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
 let appResourcesPath = agentExecutableURL.deletingLastPathComponent().path // .../AutoVolume.app/Contents/Resources
-let ntfsAutoMountService = NTFSAutoMountService(bundledInstallerPaths: NTFSBundledInstallerPaths(bundle: Bundle(path: appResourcesPath) ?? Bundle.main))
+// Shares the Agent's own `alertStore` instance (declared above) rather than default-constructing
+// a second one: both point at the same alerts.json, and now that NTFS handling runs on its own
+// queue (see `ntfsDiskQueue` below) concurrently with the main-thread check cycle, two separate
+// instances — each locking only itself — would not actually serialize access to that shared file.
+let ntfsAutoMountService = NTFSAutoMountService(alertStore: alertStore, bundledInstallerPaths: NTFSBundledInstallerPaths(bundle: Bundle(path: appResourcesPath) ?? Bundle.main))
 
 func logEnvironmentLine() {
     let appBundlePath = URL(fileURLWithPath: appResourcesPath).deletingLastPathComponent().deletingLastPathComponent().path
@@ -102,12 +106,29 @@ func handleDiskDescriptionIfEligible(_ disk: DADisk, event: String) {
     )
 }
 
+/// NTFS disk-appeared/description-changed/disappeared handling runs here, off the DiskArbitration
+/// session's own run loop (main). `handleDiskEligibleForReadWrite` calls `NTFSHelperClient.send`,
+/// a raw blocking socket `read()`/`write()` — unlike `Process.waitUntilExit()` elsewhere in this
+/// file, a blocked socket read does not spin the run loop, so calling it directly from a
+/// DASession callback would hold the main run loop hostage for the whole multi-second mount.
+/// Field testing found `diskutil unmount` (issued by the very same mount attempt, moments later)
+/// consistently took ~11s through this path versus well under 1s run standalone — the leading
+/// theory is that with the session's run loop stuck servicing this callback, diskarbitrationd had
+/// no live client to coordinate with and fell back to its own wait before proceeding, but this
+/// hasn't been confirmed against diskarbitrationd's own logs. A serial (not concurrent)
+/// queue keeps every callback here running one at a time, in registration order, matching the
+/// single-threaded behavior `NTFSAutoMountService`'s unsynchronized state (`failedBsdNames`,
+/// the debouncer, etc.) already assumes.
+let ntfsDiskQueue = DispatchQueue(label: "com.autovolume.agent.ntfsDisk")
+
 func startNTFSDiskWatcher() {
     guard let session = DASessionCreate(kCFAllocatorDefault) else { return }
     DASessionScheduleWithRunLoop(session, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
 
     let appearedCallback: DADiskAppearedCallback = { disk, _ in
-        handleDiskDescriptionIfEligible(disk, event: "appeared")
+        ntfsDiskQueue.async {
+            handleDiskDescriptionIfEligible(disk, event: "appeared")
+        }
     }
     // DADiskAppearedCallback typically fires BEFORE diskarbitrationd finishes mounting the
     // volume, at which point kDADiskDescriptionVolumePathKey is still absent and the guard
@@ -116,14 +137,18 @@ func startNTFSDiskWatcher() {
     // check there. NTFSRemountDebouncer (see handleDiskEligibleForReadWrite) makes duplicate
     // delivery across the two callbacks safe.
     let descriptionChangedCallback: DADiskDescriptionChangedCallback = { disk, _, _ in
-        handleDiskDescriptionIfEligible(disk, event: "description-changed")
+        ntfsDiskQueue.async {
+            handleDiskDescriptionIfEligible(disk, event: "description-changed")
+        }
     }
     let disappearedCallback: DADiskDisappearedCallback = { disk, _ in
         guard let namePtr = DADiskGetBSDName(disk) else { return }
         let bsdName = String(cString: namePtr)
         guard !bsdName.isEmpty else { return }
-        AutoVolumeLogger.ntfs.info("NTFS disk disappeared bsd=\(bsdName)")
-        ntfsAutoMountService.handleDiskDisappeared(bsdName: bsdName)
+        ntfsDiskQueue.async {
+            AutoVolumeLogger.ntfs.info("NTFS disk disappeared bsd=\(bsdName)")
+            ntfsAutoMountService.handleDiskDisappeared(bsdName: bsdName)
+        }
     }
     DARegisterDiskAppearedCallback(session, nil, appearedCallback, nil)
     let watchedKeys = [kDADiskDescriptionVolumePathKey] as CFArray

@@ -38,8 +38,21 @@ public struct VolumeAlert: Codable, Identifiable, Equatable {
     }
 }
 
+/// `NTFSAutoMountService` (running on the Agent's `ntfsDiskQueue`) and the Agent's regular
+/// SMB/WebDAV check cycle (running on main) both construct their own `AlertStore` pointed at the
+/// same default `alerts.json` — different instances of this class, same file. Before NTFS
+/// handling moved off the main run loop, every call into either instance was still serialized in
+/// time because only one thread ever ran Swift code at once; now they can genuinely run
+/// concurrently, and a `load()` → mutate → `save()` cycle from one thread interleaving with
+/// another's would silently lose whichever alert was written first (`.atomic` only prevents a
+/// torn/corrupt file, not this kind of lost update). The lock below makes every public operation
+/// on a given `AlertStore` instance mutually exclusive; combined with both instances resolving to
+/// the same file, that's sufficient because file writes are already atomic — the last writer
+/// under the lock always sees the immediately-prior writer's result, whichever instance it went
+/// through.
 public final class AlertStore {
     private let fileURL: URL
+    private let lock = NSLock()
 
     public init(directory: URL? = nil) {
         let baseDirectory = directory ?? FileManager.default
@@ -50,9 +63,9 @@ public final class AlertStore {
     }
 
     public func load() throws -> [VolumeAlert] {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
-        let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode([VolumeAlert].self, from: data)
+        lock.lock()
+        defer { lock.unlock() }
+        return try loadLocked()
     }
 
     public func record(volumeID: UUID, volumeName: String, message: String, date: Date = Date()) throws {
@@ -74,23 +87,37 @@ public final class AlertStore {
     }
 
     private func append(_ alert: VolumeAlert) throws {
-        var alerts = try load()
+        lock.lock()
+        defer { lock.unlock() }
+        var alerts = try loadLocked()
         alerts.removeAll { $0.volumeID == alert.volumeID }
         alerts.append(alert)
-        try save(alerts)
+        try saveLocked(alerts)
     }
 
     public func resolve(volumeID: UUID) throws {
-        var alerts = try load()
+        lock.lock()
+        defer { lock.unlock() }
+        var alerts = try loadLocked()
         alerts.removeAll { $0.volumeID == volumeID }
-        try save(alerts)
+        try saveLocked(alerts)
     }
 
     public func clear() throws {
-        try save([])
+        lock.lock()
+        defer { lock.unlock() }
+        try saveLocked([])
     }
 
-    private func save(_ alerts: [VolumeAlert]) throws {
+    /// Callers must already hold `lock`.
+    private func loadLocked() throws -> [VolumeAlert] {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+        let data = try Data(contentsOf: fileURL)
+        return try JSONDecoder().decode([VolumeAlert].self, from: data)
+    }
+
+    /// Callers must already hold `lock`.
+    private func saveLocked(_ alerts: [VolumeAlert]) throws {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
