@@ -3,6 +3,17 @@
   <channel>
     <title>AutoVolume Updates (Intel x86_64)</title>
     <item>
+      <title>Version 0.1.66</title>
+      <pubDate>Mon, 28 Sep 2026 16:46:59 +0800</pubDate>
+      <sparkle:version>66</sparkle:version>
+      <sparkle:shortVersionString>0.1.66</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/mengyuefeitian/AutoVolume/releases/download/v0.1.66/AutoVolume-0.1.66-x86_64.dmg"
+        type="application/octet-stream"
+        sparkle:edSignature="IwiFsX3MRpxFnpLbQN59fOUxgtEdJU4tPNWgu9eLN2wonv0m6n151d+LZxfX5o7FShpOkQsXeKuaev4Tl3oRAw==" length="28330058" />
+    </item>
+    <item>
       <title>Version 0.1.59</title>
       <pubDate>Mon, 28 Sep 2026 00:28:14 +0800</pubDate>
       <sparkle:version>59</sparkle:version>

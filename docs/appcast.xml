@@ -3,6 +3,17 @@
   <channel>
     <title>AutoVolume Updates</title>
     <item>
+      <title>Version 0.1.66</title>
+      <pubDate>Mon, 28 Sep 2026 16:46:53 +0800</pubDate>
+      <sparkle:version>66</sparkle:version>
+      <sparkle:shortVersionString>0.1.66</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/mengyuefeitian/AutoVolume/releases/download/v0.1.66/AutoVolume-0.1.66-arm64.dmg"
+        type="application/octet-stream"
+        sparkle:edSignature="q7dk2+TLesBJ5YFc8e0rvL/TcjNprb3AauIvWQd23ijB+f1i+UzQVOyjmj+m2jNO6Cxzky5/k+3o3K4c0Of5Dw==" length="28319478" />
+    </item>
+    <item>
       <title>Version 0.1.59</title>
       <pubDate>Mon, 28 Sep 2026 00:28:03 +0800</pubDate>
       <sparkle:version>59</sparkle:version>
