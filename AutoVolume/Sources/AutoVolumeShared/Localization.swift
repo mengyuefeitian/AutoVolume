@@ -196,6 +196,16 @@ extension L10nKey {
     public static let settingsNtfsAutoMount = L10nKey(rawValue: "settings.ntfsAutoMount")
     public static let settingsNtfsAutoMountHelp = L10nKey(rawValue: "settings.ntfsAutoMountHelp")
 
+    // MARK: - Full Disk Access permission status (Settings)
+
+    public static let settingsSectionPermissions = L10nKey(rawValue: "settings.sectionPermissions")
+    public static let settingsFullDiskAccessTitle = L10nKey(rawValue: "settings.fullDiskAccess.title")
+    public static let settingsFullDiskAccessGranted = L10nKey(rawValue: "settings.fullDiskAccess.granted")
+    public static let settingsFullDiskAccessDenied = L10nKey(rawValue: "settings.fullDiskAccess.denied")
+    public static let settingsFullDiskAccessNotInstalled = L10nKey(rawValue: "settings.fullDiskAccess.notInstalled")
+    public static let settingsFullDiskAccessHelp = L10nKey(rawValue: "settings.fullDiskAccess.help")
+    public static let settingsFullDiskAccessOpenSettings = L10nKey(rawValue: "settings.fullDiskAccess.openSettings")
+
     // MARK: - Task 5: Settings TabView (General/NTFS/About)
 
     public static let settingsTabGeneral = L10nKey(rawValue: "settings.tab.general")

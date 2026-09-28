@@ -13,6 +13,7 @@ public final class AppViewModel {
     public var editorVolume: VolumeConfig?
     public var editorSessionID = UUID()
     public private(set) var settings: AppSettings
+    public private(set) var fullDiskAccessStatus: PermissionStatus = .notInstalled
 
     /// Bumped whenever `.autoVolumeLanguageChanged` fires. `@Observable` only tracks stored
     /// properties it sees read during a view's `body` evaluation, and `L10n.resolved` is a
@@ -60,6 +61,7 @@ public final class AppViewModel {
     private let mountExposure: MountExposure
     private let settingsStore: AppSettingsStore
     private let ntfsMountedVolumesStore = NTFSMountedVolumesStore()
+    private let fullDiskAccessChecker: FullDiskAccessChecker
 
     public init(
         configStore: ConfigStore = JSONConfigStore(),
@@ -71,7 +73,8 @@ public final class AppViewModel {
         alertStore: AlertStore = AlertStore(),
         mountStateProvider: MountStateProvider = FileSystemMountStateProvider(healthCheckTimeout: 3, validatesResponsiveness: true),
         mountExposure: MountExposure = MountExposure(),
-        settingsStore: AppSettingsStore = JSONAppSettingsStore()
+        settingsStore: AppSettingsStore = JSONAppSettingsStore(),
+        fullDiskAccessChecker: FullDiskAccessChecker = FullDiskAccessChecker()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
@@ -83,6 +86,7 @@ public final class AppViewModel {
         self.mountStateProvider = mountStateProvider
         self.mountExposure = mountExposure
         self.settingsStore = settingsStore
+        self.fullDiskAccessChecker = fullDiskAccessChecker
         self.volumes = (try? configStore.load()) ?? []
         self.alerts = (try? alertStore.load()) ?? []
         self.settings = (try? settingsStore.load()) ?? AppSettings()
@@ -94,6 +98,9 @@ public final class AppViewModel {
         // asynchronously instead.
         Task { [weak self] in
             await self?.refreshVolumeStatusesAsync()
+        }
+        Task { [weak self] in
+            await self?.refreshFullDiskAccessStatusAsync()
         }
         refreshNTFSVolumes()
         languageChangeObserver = NotificationCenter.default.addObserver(
@@ -273,6 +280,18 @@ public final class AppViewModel {
         }.value
         self.alerts = loadedAlerts
         self.volumeStatuses = statuses
+    }
+
+    /// Queries the privileged helper's Full Disk Access status. This talks over a Unix socket
+    /// with up to a 5s timeout (see `NTFSHelperClient`), so — like `refreshVolumeStatusesAsync`
+    /// — it must run off-main; the Settings window calls this each time its NTFS tab appears, so
+    /// a grant made while the window is open is reflected without needing a relaunch.
+    @MainActor
+    public func refreshFullDiskAccessStatusAsync() async {
+        let checker = fullDiskAccessChecker
+        fullDiskAccessStatus = await Task.detached {
+            checker.check()
+        }.value
     }
 
     public func testConnection(_ config: VolumeConfig, password: String?) throws -> String {

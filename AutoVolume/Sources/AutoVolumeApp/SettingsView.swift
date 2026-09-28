@@ -93,8 +93,72 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section(L10n.t(.settingsSectionPermissions)) {
+                PermissionStatusRow(
+                    title: L10n.t(.settingsFullDiskAccessTitle),
+                    status: viewModel.fullDiskAccessStatus,
+                    systemSettingsURL: FullDiskAccessChecker.systemSettingsURL
+                )
+                Text(L10n.t(.settingsFullDiskAccessHelp))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+        .task {
+            await viewModel.refreshFullDiskAccessStatusAsync()
+        }
+    }
+}
+
+/// A single permission's status row: an icon + label reflecting `status`, plus a fix-it button
+/// that deep-links to the relevant System Settings pane whenever the permission is denied.
+/// Deliberately generic over `status`/`systemSettingsURL` rather than hardcoded to Full Disk
+/// Access, so a future permission this app needs can reuse it instead of growing a near-copy.
+private struct PermissionStatusRow: View {
+    let title: String
+    let status: PermissionStatus
+    let systemSettingsURL: URL
+
+    var body: some View {
+        HStack {
+            Label(title, systemImage: iconName)
+                .foregroundStyle(iconColor)
+            Spacer()
+            Text(statusText)
+                .foregroundStyle(.secondary)
+            if case .denied(let message) = status {
+                Button(L10n.t(.settingsFullDiskAccessOpenSettings)) {
+                    NSWorkspace.shared.open(systemSettingsURL)
+                }
+                .help(message)
+            }
+        }
+    }
+
+    private var iconName: String {
+        switch status {
+        case .granted: "checkmark.circle.fill"
+        case .denied: "xmark.circle.fill"
+        case .notInstalled: "circle.dashed"
+        }
+    }
+
+    private var iconColor: Color {
+        switch status {
+        case .granted: .green
+        case .denied: .red
+        case .notInstalled: .secondary
+        }
+    }
+
+    private var statusText: String {
+        switch status {
+        case .granted: L10n.t(.settingsFullDiskAccessGranted)
+        case .denied: L10n.t(.settingsFullDiskAccessDenied)
+        case .notInstalled: L10n.t(.settingsFullDiskAccessNotInstalled)
+        }
     }
 }
 

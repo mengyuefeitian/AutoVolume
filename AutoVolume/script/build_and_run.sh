@@ -123,6 +123,7 @@ swiftc \
   Sources/AutoVolumeShared/NTFSMountFailureClassifier.swift \
   Sources/AutoVolumeShared/NTFSDriverInstaller.swift \
   Sources/AutoVolumeShared/NTFSHelperClient.swift \
+  Sources/AutoVolumeShared/FullDiskAccessChecker.swift \
   Sources/AutoVolumeShared/NTFSRemountDebouncer.swift \
   Sources/AutoVolumeShared/NTFSAutoMountService.swift \
   Sources/AutoVolumeShared/UpdateSchedule.swift

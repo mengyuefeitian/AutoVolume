@@ -93,6 +93,26 @@ func isStillAMountPoint(_ path: String) -> Bool {
     return mountedOn == path
 }
 
+/// Full Disk Access is checked by opening a raw disk device node — the exact class of
+/// resource whose denial caused the real-world bug this exists to catch: `ntfs-3g` opening
+/// `/dev/diskN` inside this same process got EPERM despite running as root, because TCC gates
+/// raw disk access independently of Unix permissions. `/dev/rdisk0` (the boot volume's raw
+/// device) always exists, so a plain open/close here — no data is read — mirrors that check
+/// without needing any disk actually inserted.
+func checkFullDiskAccess() -> NTFSHelperResponse {
+    let probePath = "/dev/rdisk0"
+    let fileDescriptor = open(probePath, O_RDONLY)
+    guard fileDescriptor >= 0 else {
+        let capturedErrno = errno
+        let message = capturedErrno == EPERM
+            ? "Full Disk Access is not granted to \(NTFSHelperSocket.daemonLabel)"
+            : "failed to open \(probePath): \(String(cString: strerror(capturedErrno)))"
+        return NTFSHelperResponse(success: false, message: message)
+    }
+    close(fileDescriptor)
+    return NTFSHelperResponse(success: true)
+}
+
 func startNTFSLogStreamIfNeeded() {
     if let existing = ntfsLogStreamProcess {
         if existing.isRunning { return }
@@ -236,6 +256,14 @@ func handle(clientSocket: Int32) {
             return
         }
 
+        // Has no mountPoint of its own (it probes a fixed raw disk device, not anything under
+        // /Volumes), so it must be handled before the canonicalization gate below, which every
+        // other action needs.
+        if request.action == .checkFullDiskAccess {
+            respond(checkFullDiskAccess(), on: clientSocket)
+            return
+        }
+
         guard let mountPoint = canonicalizedMountPointUnderVolumes(request.mountPoint) else {
             log("rejected \(request.action) request: mountPoint \(request.mountPoint) does not canonicalize under /Volumes")
             respond(NTFSHelperResponse(success: false, message: "mountPoint must canonicalize to a path under /Volumes"), on: clientSocket)
@@ -338,6 +366,10 @@ func handle(clientSocket: Int32) {
                 }
             }
             respond(NTFSHelperResponse(success: success, message: result.stderr), on: clientSocket)
+        case .checkFullDiskAccess:
+            // Already handled above, before the mountPoint canonicalization gate — this action
+            // has no mountPoint of its own, so it never reaches this switch in practice.
+            respond(checkFullDiskAccess(), on: clientSocket)
         }
     } catch {
         log("error handling request: \(error.localizedDescription)")

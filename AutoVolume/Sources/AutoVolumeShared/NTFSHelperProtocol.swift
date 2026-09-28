@@ -27,6 +27,9 @@ public enum NTFSHelperSocket {
 public enum NTFSHelperAction: String, Codable, Equatable {
     case mount
     case unmount
+    /// Probes whether this daemon's process has Full Disk Access, independent of any
+    /// particular volume — see `checkFullDiskAccess()` in `NTFSPrivilegedHelper/main.swift`.
+    case checkFullDiskAccess
 }
 
 public struct NTFSHelperRequest: Codable, Equatable {
@@ -46,6 +49,10 @@ public struct NTFSHelperRequest: Codable, Equatable {
         self.devicePath = devicePath
         self.mountPoint = mountPoint
         self.volumeName = volumeName
+    }
+
+    public static func checkFullDiskAccess() -> NTFSHelperRequest {
+        NTFSHelperRequest(action: .checkFullDiskAccess, mountPoint: "")
     }
 }
 
@@ -95,6 +102,8 @@ public enum NTFSHelperWireFormat {
 
 public enum NTFSHelperRequestValidator {
     public static func validate(_ request: NTFSHelperRequest) -> String? {
+        // Has no mountPoint of its own — it probes a fixed device, not anything under /Volumes.
+        guard request.action != .checkFullDiskAccess else { return nil }
         guard request.mountPoint.hasPrefix("/Volumes/") else {
             return "mountPoint must be under /Volumes"
         }

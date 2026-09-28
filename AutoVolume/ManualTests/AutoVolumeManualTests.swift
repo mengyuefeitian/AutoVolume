@@ -1130,6 +1130,52 @@ func testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath() throws 
     try expect(error != nil, "A mount action without devicePath must be rejected")
 }
 
+func testNTFSHelperRequestValidatorAcceptsCheckFullDiskAccessWithoutMountPoint() throws {
+    let request = NTFSHelperRequest.checkFullDiskAccess()
+
+    let error = NTFSHelperRequestValidator.validate(request)
+
+    try expect(error == nil, "checkFullDiskAccess has no mountPoint of its own and must not be rejected for lacking one, got: \(error ?? "")")
+}
+
+func testNTFSHelperRequestCheckFullDiskAccessRoundTripsThroughJSON() throws {
+    let request = NTFSHelperRequest.checkFullDiskAccess()
+
+    let encoded = try NTFSHelperWireFormat.encode(request)
+    let decoded = try NTFSHelperWireFormat.decodeRequest(encoded)
+
+    try expect(decoded == request, "checkFullDiskAccess request did not round trip through the wire format")
+    try expect(decoded.action == .checkFullDiskAccess, "Decoded action should be .checkFullDiskAccess")
+}
+
+func testFullDiskAccessCheckerReportsGrantedWhenHelperSucceeds() throws {
+    let client = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: true))
+    let checker = FullDiskAccessChecker(helperClient: client)
+
+    let status = checker.check()
+
+    try expect(status == .granted, "Expected .granted when the helper reports success")
+    try expect(client.sentRequests.first?.action == .checkFullDiskAccess, "Checker should send a checkFullDiskAccess request")
+}
+
+func testFullDiskAccessCheckerReportsDeniedWithHelperMessage() throws {
+    let client = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: false, message: "Full Disk Access is not granted to com.autovolume.ntfshelper"))
+    let checker = FullDiskAccessChecker(helperClient: client)
+
+    let status = checker.check()
+
+    try expect(status == .denied(message: "Full Disk Access is not granted to com.autovolume.ntfshelper"), "Expected .denied with the helper's message, got \(status)")
+}
+
+func testFullDiskAccessCheckerReportsNotInstalledWhenHelperUnreachable() throws {
+    let client = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: false, message: "could not connect to NTFSPrivilegedHelper (errno 2)"))
+    let checker = FullDiskAccessChecker(helperClient: client)
+
+    let status = checker.check()
+
+    try expect(status == .notInstalled, "A helper that isn't running yet should read as .notInstalled, not .denied, got \(status)")
+}
+
 func testNTFSDriverPathsAreUnderPrivilegedHelperTools() throws {
     try expect(NTFSDriverPaths.installDirectory == "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver", "installDirectory changed unexpectedly")
     try expect(NTFSDriverPaths.ntfs3gExecutablePath == "/Library/PrivilegedHelperTools/com.autovolume.ntfsdriver/ntfs-3g", "ntfs3gExecutablePath changed unexpectedly")
@@ -1166,6 +1212,19 @@ func testNTFSMountPlannerMountSetsVolnameFromVolumeName() throws {
     try expect(plan.arguments.contains("-ovolname=数据"), "Mount plan should pass the real volume name as -o volname, got \(plan.arguments)")
 }
 
+/// FUSE-T's NTFS mounts are actually a loopback NFS re-export; Finder groups every mount that
+/// shares the same NFS "location" under one sidebar entry, and without this option that location
+/// defaults to the literal string "fuse-t" (see `/Library/Application Support/fuse-t/cfg/fuse-t.ini`,
+/// `;location=fuse-t`), so every NTFS drive nests under a confusing "fuse-t" entry instead of
+/// showing up on its own. Setting it to the volume's own name flattens that back to one level.
+func testNTFSMountPlannerMountSetsLocationFromVolumeName() throws {
+    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
+
+    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/数据", volumeName: "数据")
+
+    try expect(plan.arguments.contains("-olocation=数据"), "Mount plan should pass the volume name as -o location to avoid Finder nesting everything under \"fuse-t\", got \(plan.arguments)")
+}
+
 /// A comma in the volume name would otherwise be misread by libfuse's `-o` parser as the start
 /// of a second, bogus option (no escape syntax exists for commas within a single `-o` value).
 func testNTFSMountPlannerMountSanitizesCommasInVolumeName() throws {
@@ -1174,6 +1233,7 @@ func testNTFSMountPlannerMountSanitizesCommasInVolumeName() throws {
     let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/My Drive", volumeName: "My,Drive")
 
     try expect(plan.arguments.contains("-ovolname=My_Drive"), "Comma in volume name should be sanitized, got \(plan.arguments)")
+    try expect(plan.arguments.contains("-olocation=My_Drive"), "Comma in volume name should be sanitized in -o location too, got \(plan.arguments)")
     try expect(!plan.arguments.contains { $0.contains(",") }, "No argument should contain an unsanitized comma, got \(plan.arguments)")
 }
 
@@ -1893,10 +1953,16 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSHelperRequestValidator rejects outside /Volumes", testNTFSHelperRequestValidatorRejectsMountPointOutsideVolumes),
     ("NTFSHelperRequestValidator accepts /Volumes path", testNTFSHelperRequestValidatorAcceptsMountPointUnderVolumes),
     ("NTFSHelperRequestValidator rejects mount without devicePath", testNTFSHelperRequestValidatorRejectsMountActionWithoutDevicePath),
+    ("NTFSHelperRequestValidator accepts checkFullDiskAccess without mountPoint", testNTFSHelperRequestValidatorAcceptsCheckFullDiskAccessWithoutMountPoint),
+    ("NTFSHelperRequest checkFullDiskAccess wire round trip", testNTFSHelperRequestCheckFullDiskAccessRoundTripsThroughJSON),
+    ("FullDiskAccessChecker reports granted", testFullDiskAccessCheckerReportsGrantedWhenHelperSucceeds),
+    ("FullDiskAccessChecker reports denied with helper message", testFullDiskAccessCheckerReportsDeniedWithHelperMessage),
+    ("FullDiskAccessChecker reports not installed when helper unreachable", testFullDiskAccessCheckerReportsNotInstalledWhenHelperUnreachable),
     ("NTFSDriverPaths constants", testNTFSDriverPathsAreUnderPrivilegedHelperTools),
     ("NTFSMountPlanner unmount uses diskutil", testNTFSMountPlannerUnmountUsesDiskutil),
     ("NTFSMountPlanner mount uses bundled ntfs-3g", testNTFSMountPlannerMountUsesBundledNtfs3g),
     ("NTFSMountPlanner mount sets volname from volumeName", testNTFSMountPlannerMountSetsVolnameFromVolumeName),
+    ("NTFSMountPlanner mount sets location from volumeName", testNTFSMountPlannerMountSetsLocationFromVolumeName),
     ("NTFSMountPlanner mount sanitizes commas in volume name", testNTFSMountPlannerMountSanitizesCommasInVolumeName),
     ("NTFSMountPlanner mount appends remove_hiberfile when requested", testNTFSMountPlannerMountAppendsRemoveHiberfileWhenRequested),
     ("NTFSMountPlanner mount omits remove_hiberfile by default", testNTFSMountPlannerMountOmitsRemoveHiberfileByDefault),
