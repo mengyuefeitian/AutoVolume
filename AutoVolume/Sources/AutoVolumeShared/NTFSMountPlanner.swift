@@ -35,12 +35,6 @@ public struct NTFSMountPlanner {
         if let volumeName, !volumeName.isEmpty {
             let sanitized = volumeName.replacingOccurrences(of: ",", with: "_")
             arguments.append("-ovolname=\(sanitized)")
-            // FUSE-T's NTFS mounts are actually a loopback NFS re-export; Finder groups every
-            // mount under one sidebar entry keyed by this "location" string, which defaults to
-            // the literal "fuse-t" when unset (see fuse-t.ini's `;location=fuse-t`). Left at the
-            // default, every NTFS drive nests under a confusing "fuse-t" entry instead of
-            // appearing on its own — set it to the volume's own name to flatten that back out.
-            arguments.append("-olocation=\(sanitized)")
         }
         return CommandPlan(executable: ntfs3gPath, arguments: arguments)
     }

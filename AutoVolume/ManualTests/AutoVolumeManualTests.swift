@@ -1212,19 +1212,6 @@ func testNTFSMountPlannerMountSetsVolnameFromVolumeName() throws {
     try expect(plan.arguments.contains("-ovolname=数据"), "Mount plan should pass the real volume name as -o volname, got \(plan.arguments)")
 }
 
-/// FUSE-T's NTFS mounts are actually a loopback NFS re-export; Finder groups every mount that
-/// shares the same NFS "location" under one sidebar entry, and without this option that location
-/// defaults to the literal string "fuse-t" (see `/Library/Application Support/fuse-t/cfg/fuse-t.ini`,
-/// `;location=fuse-t`), so every NTFS drive nests under a confusing "fuse-t" entry instead of
-/// showing up on its own. Setting it to the volume's own name flattens that back to one level.
-func testNTFSMountPlannerMountSetsLocationFromVolumeName() throws {
-    let planner = NTFSMountPlanner(ntfs3gPath: NTFSDriverPaths.ntfs3gExecutablePath)
-
-    let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/数据", volumeName: "数据")
-
-    try expect(plan.arguments.contains("-olocation=数据"), "Mount plan should pass the volume name as -o location to avoid Finder nesting everything under \"fuse-t\", got \(plan.arguments)")
-}
-
 /// A comma in the volume name would otherwise be misread by libfuse's `-o` parser as the start
 /// of a second, bogus option (no escape syntax exists for commas within a single `-o` value).
 func testNTFSMountPlannerMountSanitizesCommasInVolumeName() throws {
@@ -1233,7 +1220,6 @@ func testNTFSMountPlannerMountSanitizesCommasInVolumeName() throws {
     let plan = planner.mountReadWritePlan(devicePath: "/dev/disk4s1", mountPoint: "/Volumes/My Drive", volumeName: "My,Drive")
 
     try expect(plan.arguments.contains("-ovolname=My_Drive"), "Comma in volume name should be sanitized, got \(plan.arguments)")
-    try expect(plan.arguments.contains("-olocation=My_Drive"), "Comma in volume name should be sanitized in -o location too, got \(plan.arguments)")
     try expect(!plan.arguments.contains { $0.contains(",") }, "No argument should contain an unsanitized comma, got \(plan.arguments)")
 }
 
@@ -1962,7 +1948,6 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSMountPlanner unmount uses diskutil", testNTFSMountPlannerUnmountUsesDiskutil),
     ("NTFSMountPlanner mount uses bundled ntfs-3g", testNTFSMountPlannerMountUsesBundledNtfs3g),
     ("NTFSMountPlanner mount sets volname from volumeName", testNTFSMountPlannerMountSetsVolnameFromVolumeName),
-    ("NTFSMountPlanner mount sets location from volumeName", testNTFSMountPlannerMountSetsLocationFromVolumeName),
     ("NTFSMountPlanner mount sanitizes commas in volume name", testNTFSMountPlannerMountSanitizesCommasInVolumeName),
     ("NTFSMountPlanner mount appends remove_hiberfile when requested", testNTFSMountPlannerMountAppendsRemoveHiberfileWhenRequested),
     ("NTFSMountPlanner mount omits remove_hiberfile by default", testNTFSMountPlannerMountOmitsRemoveHiberfileByDefault),

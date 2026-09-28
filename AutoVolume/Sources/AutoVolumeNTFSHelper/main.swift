@@ -282,7 +282,15 @@ func handle(clientSocket: Int32) {
                 respond(NTFSHelperResponse(success: false, message: "devicePath must be a /dev/diskN device node"), on: clientSocket)
                 return
             }
-            _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+            // Timed and logged (unlike the retry's own pre-mount unmount below) because this is
+            // the very first thing this action does, and it was found to be the actual source
+            // of multi-second mount delays that had no visibility at all before this — the only
+            // logged step in this whole path used to be the ntfs-3g invocation itself, which is
+            // consistently fast (under 1s), leaving whatever preceded it as an unexplained gap.
+            let preMountUnmountStart = DispatchTime.now().uptimeNanoseconds
+            let preMountUnmountResult = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+            let preMountUnmountDurationMs = (DispatchTime.now().uptimeNanoseconds - preMountUnmountStart) / 1_000_000
+            log("pre-mount unmount \(mountPoint): exitCode=\(preMountUnmountResult?.exitCode ?? -1) stderr=\(preMountUnmountResult?.stderr ?? "n/a") duration_ms=\(preMountUnmountDurationMs)")
             // `diskutil unmount` removes the mount point directory itself once nothing is
             // mounted there anymore — ntfs-3g needs it to already exist. Without this, ntfs-3g
             // (which forks and daemonizes) can hand back exit code 0 from its parent process
@@ -303,7 +311,10 @@ func handle(clientSocket: Int32) {
                 // mount must be cleared again before retrying, or ntfs-3g finds the mount point
                 // already occupied.
                 log("ntfs-3g reported NTFS_VOLUME_HIBERNATED for \(devicePath); retrying with remove_hiberfile")
-                _ = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+                let retryUnmountStart = DispatchTime.now().uptimeNanoseconds
+                let retryUnmountResult = try? commandRunner.run(mountPlanner.unmountReadOnlyPlan(mountPoint: mountPoint))
+                let retryUnmountDurationMs = (DispatchTime.now().uptimeNanoseconds - retryUnmountStart) / 1_000_000
+                log("pre-retry unmount \(mountPoint): exitCode=\(retryUnmountResult?.exitCode ?? -1) stderr=\(retryUnmountResult?.stderr ?? "n/a") duration_ms=\(retryUnmountDurationMs)")
                 try? FileManager.default.createDirectory(atPath: mountPoint, withIntermediateDirectories: true)
                 let retryPlan = mountPlanner.mountReadWritePlan(devicePath: devicePath, mountPoint: mountPoint, volumeName: request.volumeName, removeHiberfile: true)
                 let retryStart = DispatchTime.now().uptimeNanoseconds
