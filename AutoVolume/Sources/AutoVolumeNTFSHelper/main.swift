@@ -262,7 +262,7 @@ func handle(clientSocket: Int32) {
             log("ntfs-3g args=\(mountPlan.arguments) exitCode=\(mountResult.exitCode) stdout=\(mountResult.stdout) stderr=\(mountResult.stderr) duration_ms=\(mountDurationMs)")
 
             var recoveredFromHibernation = false
-            if NTFSMountFailureClassifier.classify(exitCode: mountResult.exitCode) == .hibernated {
+            if NTFSMountFailureClassifier.classify(exitCode: mountResult.exitCode, stderr: mountResult.stderr) == .hibernated {
                 // The failed attempt above leaves nothing mounted at `mountPoint`, but
                 // diskarbitrationd races to remount the disk read-only (via its own FSKit
                 // fallback) the moment it notices the read-write attempt let go — that read-only

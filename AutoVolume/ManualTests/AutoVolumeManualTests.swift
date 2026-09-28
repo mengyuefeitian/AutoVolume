@@ -1193,18 +1193,28 @@ func testNTFSMountPlannerMountOmitsRemoveHiberfileByDefault() throws {
     try expect(!plan.arguments.contains("-oremove_hiberfile"), "First mount attempt must not pre-emptively discard the hibernation file, got \(plan.arguments)")
 }
 
-/// Exit code 14 is ntfs-3g's documented `NTFS_VOLUME_HIBERNATED` (ntfs-3g.probe(8)). Matching
-/// on this exact code — not a substring of ntfs-3g's English stderr text — is what this
-/// classifier exists to centralize, so `NTFSPrivilegedHelper`'s untested glue only has to call
-/// it, not re-derive the exit code's meaning inline.
+/// Exit code 14 is ntfs-3g's documented `NTFS_VOLUME_HIBERNATED` (ntfs-3g.probe(8)) — but only
+/// when it actually got far enough to check the volume's hibernation flag. See the type's doc
+/// comment for why stderr must also be checked.
 func testNTFSMountFailureClassifierRecognizesHibernatedExitCode() throws {
-    try expect(NTFSMountFailureClassifier.classify(exitCode: 14) == .hibernated, "Exit code 14 must classify as hibernated")
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 14, stderr: "Windows is hibernated, refused to mount.") == .hibernated, "Exit code 14 with a genuine hibernation message must classify as hibernated")
 }
 
 func testNTFSMountFailureClassifierTreatsOtherExitCodesAsOther() throws {
-    try expect(NTFSMountFailureClassifier.classify(exitCode: 0) == .other, "Exit code 0 (success) must not classify as hibernated")
-    try expect(NTFSMountFailureClassifier.classify(exitCode: 1) == .other, "An unrelated failure exit code must not classify as hibernated")
-    try expect(NTFSMountFailureClassifier.classify(exitCode: 13) == .other, "Exit code 13 (not the documented hibernation code) must not classify as hibernated")
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 0, stderr: "") == .other, "Exit code 0 (success) must not classify as hibernated")
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 1, stderr: "") == .other, "An unrelated failure exit code must not classify as hibernated")
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 13, stderr: "") == .other, "Exit code 13 (not the documented hibernation code) must not classify as hibernated")
+}
+
+/// Reproduces a real, field-observed false positive: ntfs-3g maps a plain device-`open(2)`
+/// failure (e.g. `EPERM`) to the same exit code 14 as genuine hibernation, but with stderr
+/// starting "Error opening '/dev/diskN': ..." — it never got far enough to read the volume's
+/// hibernation flag at all. Classifying this as `.hibernated` would make `-o remove_hiberfile`
+/// get tried for a problem it cannot fix, and would tell the user a hibernation-recovery notice
+/// that isn't true.
+func testNTFSMountFailureClassifierDoesNotTreatDeviceOpenFailureAsHibernated() throws {
+    let stderr = "Error opening '/dev/disk4s3': Operation not permitted\nFailed to mount '/dev/disk4s3': Operation not permitted\nThe NTFS partition is in an unsafe state."
+    try expect(NTFSMountFailureClassifier.classify(exitCode: 14, stderr: stderr) == .other, "Exit code 14 caused by a device-open failure must not classify as hibernated")
 }
 
 func testNTFSDriverInstallerDetectsFUSETInstalledMarker() throws {
@@ -1640,6 +1650,49 @@ func testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails() throws {
     )
 }
 
+/// Reproduces a real-world failure loop: once a volume's read-write mount fails, macOS's own
+/// DiskArbitration keeps firing description-changed events for it (it re-mounts the volume
+/// read-only after our failed attempt, which itself is a description change). Without this
+/// guard, `NTFSRemountDebouncer`'s 30s cooldown alone would let every one of those events start
+/// a fresh attempt — each one unmounting whatever the user is currently browsing at that path,
+/// failing again, and getting remounted read-only — indefinitely, for as long as the disk
+/// stays inserted. A failed bsdName must be left alone until it's physically removed and
+/// reinserted (`handleDiskDisappeared`), not retried on a timer.
+func testNTFSAutoMountServiceDoesNotRetryFailedVolumeUntilDiskDisappears() throws {
+    let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+        try? FileManager.default.removeItem(at: volumesDirectory)
+    }
+    let settingsStore = JSONAppSettingsStore(directory: settingsDirectory)
+    try settingsStore.save(AppSettings(autoMountNTFSReadWrite: true))
+    let helperClient = RecordingHelperClient(responseToReturn: NTFSHelperResponse(success: false, message: "mount failed"))
+    let volumesStore = NTFSMountedVolumesStore(directory: volumesDirectory)
+    let service = NTFSAutoMountService(
+        settingsStore: settingsStore,
+        driverInstaller: NTFSDriverInstaller(fuseTMarkerPath: "/Library/Application Support/fuse-t/uninstall.sh"),
+        helperClient: helperClient,
+        mountedVolumesStore: volumesStore,
+        commandRunner: RecordingCommandRunner(),
+        alertStore: AlertStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
+        logger: AutoVolumeLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    )
+
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s3", devicePath: "/dev/disk4s3", volumeName: "数据", mountPoint: "/Volumes/数据", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+    try expect(helperClient.sentRequests.count == 1, "First attempt should reach the helper")
+
+    // Simulate the OS re-firing description-changed after remounting read-only post-failure —
+    // same bsdName, same everything, arriving well past the debouncer's 30s cooldown.
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s3", devicePath: "/dev/disk4s3", volumeName: "数据", mountPoint: "/Volumes/数据", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+    try expect(helperClient.sentRequests.count == 1, "A bsdName that already failed this session must not be retried automatically")
+
+    // Physically removing and reinserting the disk is the one thing that should re-arm it.
+    service.handleDiskDisappeared(bsdName: "disk4s3")
+    service.handleDiskEligibleForReadWrite(bsdName: "disk4s3", devicePath: "/dev/disk4s3", volumeName: "数据", mountPoint: "/Volumes/数据", filesystemPersonality: "Windows_NTFS", mountedFileSystemName: "ntfs")
+    try expect(helperClient.sentRequests.count == 2, "After the disk disappears and reappears, a fresh attempt should be allowed")
+}
+
 func testNTFSAutoMountServiceRecordsAlertAndSkipsHelperWhenInstallFails() throws {
     let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let volumesDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -1832,6 +1885,7 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSMountPlanner mount omits remove_hiberfile by default", testNTFSMountPlannerMountOmitsRemoveHiberfileByDefault),
     ("NTFSMountFailureClassifier recognizes hibernated exit code", testNTFSMountFailureClassifierRecognizesHibernatedExitCode),
     ("NTFSMountFailureClassifier treats other exit codes as other", testNTFSMountFailureClassifierTreatsOtherExitCodesAsOther),
+    ("NTFSMountFailureClassifier does not treat device-open failure as hibernated", testNTFSMountFailureClassifierDoesNotTreatDeviceOpenFailureAsHibernated),
     ("NTFSDriverInstaller detects FUSE-T installed marker", testNTFSDriverInstallerDetectsFUSETInstalledMarker),
     ("NTFSDriverInstaller detects FUSE-T missing marker", testNTFSDriverInstallerDetectsFUSETMissingMarker),
     ("NTFSDriverInstaller helper-installed matches daemon plist presence", testNTFSDriverInstallerHelperInstalledMatchesDaemonPlistPresence),
@@ -1853,6 +1907,7 @@ let tests: [(String, () throws -> Void)] = [
     ("NTFSAutoMountService installs driver then sends helper mount request", testNTFSAutoMountServiceInstallsDriverThenSendsHelperMountRequest),
     ("NTFSAutoMountService records informational alert when recovered from hibernation", testNTFSAutoMountServiceRecordsInformationalAlertWhenRecoveredFromHibernation),
     ("NTFSAutoMountService does not record volume when helper mount fails", testNTFSAutoMountServiceDoesNotRecordVolumeWhenHelperMountFails),
+    ("NTFSAutoMountService does not retry failed volume until disk disappears", testNTFSAutoMountServiceDoesNotRetryFailedVolumeUntilDiskDisappears),
     ("NTFSAutoMountService records alert and skips helper when install fails", testNTFSAutoMountServiceRecordsAlertAndSkipsHelperWhenInstallFails),
     ("NTFSAutoMountService cleans up helper and debouncer on eject", testNTFSAutoMountServiceUnmountCleansUpHelperAndDebouncerOnEject),
     ("NTFSDriverInstaller builds uninstall plan", testNTFSDriverInstallerBuildsUninstallPlan),

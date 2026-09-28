@@ -65,6 +65,17 @@ public final class NTFSAutoMountService {
     /// separate dictionary/ID space so a device's hibernation notice can't collide with (and get
     /// silently replaced by) a mount-failure alert for that same device, or vice versa.
     private var hibernationRecoveredAlertIDs: [String: UUID] = [:]
+    /// bsdNames whose read-write mount attempt failed this session. `CheckScheduler`-style
+    /// debouncing (`NTFSRemountDebouncer`) only limits how *often* we retry — it doesn't stop
+    /// retrying, so once a volume enters a genuinely stuck failure state, every subsequent
+    /// DiskArbitration description-changed event (which the OS itself generates every time it
+    /// re-mounts the volume read-only after our failed attempt) fires another cycle of
+    /// unmounting whatever the user is currently browsing, failing again, and getting
+    /// remounted read-only — indefinitely, every ~30s, for as long as the disk stays inserted.
+    /// Once a bsdName fails, skip it entirely until `handleDiskDisappeared` clears it (i.e. the
+    /// disk is physically removed and reinserted, or the app restarts) rather than retrying on
+    /// a timer against a volume already known not to work right now.
+    private var failedBsdNames: Set<String> = []
 
     public init(
         settingsStore: AppSettingsStore = JSONAppSettingsStore(),
@@ -99,6 +110,10 @@ public final class NTFSAutoMountService {
         guard NTFSDiskClassifier.isNTFSFileSystem(personality: filesystemPersonality) else { return }
         guard !NTFSDiskClassifier.isOwnedByOurDriver(mountedFileSystemName: mountedFileSystemName) else {
             logger.info("NTFS disk bsd=\(bsdName) kind=\(mountedFileSystemName ?? "unknown") name=\(volumeName) path=\(mountPoint) already owned by our driver, skipping")
+            return
+        }
+        guard !failedBsdNames.contains(bsdName) else {
+            logger.info("NTFS disk bsd=\(bsdName) name=\(volumeName) already failed this session, skipping until physically reinserted")
             return
         }
         guard debouncer.shouldProcess(bsdName: bsdName) else {
@@ -177,6 +192,7 @@ public final class NTFSAutoMountService {
         logger.info("NTFS helper response: \(response.success ? "success" : "failure") message=\(CommandResult.redacted(response.message)) duration_ms=\(responseDurationMs)")
 
         guard response.success else {
+            failedBsdNames.insert(bsdName)
             try? alertStore.record(
                 volumeID: mountFailureAlertID(for: bsdName),
                 volumeName: volumeName,
@@ -215,6 +231,7 @@ public final class NTFSAutoMountService {
         }
         try? mountedVolumesStore.remove(bsdName: bsdName)
         debouncer.clear(bsdName: bsdName)
+        failedBsdNames.remove(bsdName)
     }
 
     private func mountFailureAlertID(for bsdName: String) -> UUID {
