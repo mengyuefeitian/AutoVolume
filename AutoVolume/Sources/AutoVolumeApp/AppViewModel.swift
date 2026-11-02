@@ -62,6 +62,7 @@ public final class AppViewModel {
     private let settingsStore: AppSettingsStore
     private let ntfsMountedVolumesStore = NTFSMountedVolumesStore()
     private let fullDiskAccessChecker: FullDiskAccessChecker
+    private let nfsExportLister: NFSExportListing
 
     public init(
         configStore: ConfigStore = JSONConfigStore(),
@@ -74,7 +75,8 @@ public final class AppViewModel {
         mountStateProvider: MountStateProvider = FileSystemMountStateProvider(healthCheckTimeout: 3, validatesResponsiveness: true),
         mountExposure: MountExposure = MountExposure(),
         settingsStore: AppSettingsStore = JSONAppSettingsStore(),
-        fullDiskAccessChecker: FullDiskAccessChecker = FullDiskAccessChecker()
+        fullDiskAccessChecker: FullDiskAccessChecker = FullDiskAccessChecker(),
+        nfsExportLister: NFSExportListing = ShowmountExportLister()
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
@@ -87,6 +89,7 @@ public final class AppViewModel {
         self.mountExposure = mountExposure
         self.settingsStore = settingsStore
         self.fullDiskAccessChecker = fullDiskAccessChecker
+        self.nfsExportLister = nfsExportLister
         self.volumes = (try? configStore.load()) ?? []
         self.alerts = (try? alertStore.load()) ?? []
         self.settings = (try? settingsStore.load()) ?? AppSettings()
@@ -304,8 +307,10 @@ public final class AppViewModel {
 
         let result = try runTemporaryMountTest(for: config, password: password)
         guard result.exitCode == 0 else {
-            AutoVolumeLogger.shared.warning("Connection test failed for \(config.name): \(commandFailureMessage(result, fallbackKey: .errorCommandConnectionTestFailed))")
-            throw AppViewModelError.commandFailed(commandFailureMessage(result, fallbackKey: .errorCommandConnectionTestFailed))
+            let message = nfsDiagnosisMessage(for: config, result: result)
+                ?? commandFailureMessage(result, fallbackKey: .errorCommandConnectionTestFailed)
+            AutoVolumeLogger.shared.warning("Connection test failed for \(config.name): \(message)")
+            throw AppViewModelError.commandFailed(message)
         }
         AutoVolumeLogger.shared.info("Connection test passed for \(config.name)")
         return L10n.t(.statusTestSucceeded)
@@ -317,7 +322,35 @@ public final class AppViewModel {
         }.value
     }
 
+    /// Mounts `config`. An NFS volume saved with a share name ("video") fails with a misleading
+    /// "Permission denied"; when that happens the server's exports are checked, and if exactly one
+    /// matches by name the mount is retried with the full export path ("/volume1/video") and that path is
+    /// saved, because the agent mounts from the saved configuration. Nothing is looked up on the success
+    /// path, so a working volume never pays for a `showmount`.
     public func mount(_ config: VolumeConfig, password: String? = nil) async throws -> String {
+        do {
+            return try await performMount(config, password: password)
+        } catch {
+            guard config.protocolType == .nfs, let corrected = await correctedNFSPath(for: config) else { throw error }
+            AutoVolumeLogger.shared.info("NFS path for \(config.name) corrected from \(config.remotePath) to \(corrected)")
+            var fixed = config
+            fixed.remotePath = corrected
+            let message = try await performMount(fixed, password: password)
+            let saved = await MainActor.run { () -> Bool in
+                guard self.volumes.contains(where: { $0.id == fixed.id }) else { return false }
+                do {
+                    try self.save(fixed, password: nil)
+                    return true
+                } catch {
+                    AutoVolumeLogger.shared.error("Could not save the corrected NFS path for \(fixed.name): \(error.localizedDescription)")
+                    return false
+                }
+            }
+            return saved ? "\(L10n.t(.statusNFSPathCorrected, corrected)) \(message)" : message
+        }
+    }
+
+    private func performMount(_ config: VolumeConfig, password: String?) async throws -> String {
         AutoVolumeLogger.shared.info("Mount requested for \(config.name) \(config.protocolType.rawValue)")
         let operationName = "\(config.protocolType.rawValue)-mount \(config.name)"
         DiagnosticsContext.shared.begin(operationName)
@@ -701,7 +734,34 @@ public final class AppViewModel {
         return detail
     }
 
+    /// For an NFS failure, a message that says what is actually wrong. Asks the server for its export
+    /// list so "Permission denied" can be told apart (path not exported vs. client not allowed); this
+    /// only runs after a failure the user is looking at, never on the agent's unattended path.
+    private func nfsDiagnosisMessage(for config: VolumeConfig, result: CommandResult) -> String? {
+        guard config.protocolType == .nfs else { return nil }
+        let exports = NFSExportResolver.resolution(for: config, lister: nfsExportLister)?.exports
+        guard let diagnosis = NFSMountDiagnostics.diagnose(stderr: result.stderr, requestedPath: config.remotePath, exports: exports) else {
+            return nil
+        }
+        return L10n.t(diagnosis.key, args: diagnosis.args)
+    }
+
+    /// If `config` is an NFS volume whose path is not exported as typed but matches exactly one export
+    /// by name (the SMB share name "video" vs the Synology export "/volume1/video"), the full path.
+    public func correctedNFSPath(for config: VolumeConfig) async -> String? {
+        guard config.protocolType == .nfs else { return nil }
+        let lister = nfsExportLister
+        let resolution = await Task.detached {
+            NFSExportResolver.resolution(for: config, lister: lister)?.resolution
+        }.value
+        if case .matched(let path)? = resolution { return path }
+        return nil
+    }
+
     private func mountFailureMessage(for config: VolumeConfig, result: CommandResult) -> String {
+        if let nfsMessage = nfsDiagnosisMessage(for: config, result: result) {
+            return nfsMessage
+        }
         let detail = result.stderr.isEmpty ? result.stdout : result.stderr
         if config.protocolType == .webdav, detail.contains("-5014") {
             return L10n.t(.errorMountWebdavFinder5014)

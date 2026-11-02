@@ -710,6 +710,171 @@ func testMountStateHandlesIPv6AndBracketedHosts() throws {
     try expect(mountedState(smbOutput).isMounted(config: smb), "A bracketed IPv6 SMB source must match")
 }
 
+// MARK: - NFS configuration (user report "nfs及 Jellyfin 问题")
+
+/// Real `showmount -e` output of the Synology NAS in the report: the shares are exported by their FULL
+/// path (`/volume1/video`), not by share name.
+private let synologyShowmount = """
+Exports list on 192.168.3.106:
+/volume1/video                      192.168.3.110 192.168.3.5
+/volume1/immich-media               192.168.3.0/24
+"""
+
+/// The failing stderr from the user's diagnostics: the app sent `/video`, the NAS only exports `/volume1/video`.
+private let issueNFSDenied = "mount_nfs: can't mount /video from 192.168.3.106 onto /Users/andy/Volumes/video: Permission denied"
+
+func testNFSQuietMountPlanUsesTheUsersProvenOptions() throws {
+    let nfs = VolumeConfig(name: "video", protocolType: .nfs, server: "192.168.3.106", remotePath: "/volume1/video", username: nil, mountPoint: "/Users/andy/Volumes/video", checkIntervalSeconds: 300, isEnabled: true)
+    let plan = try MountPlanner().mountPlan(for: nfs, password: nil, suppressesUserInterface: true)
+    try expect(plan == CommandPlan(
+        executable: "/sbin/mount_nfs",
+        arguments: ["-o", "soft,nolocks,noowners,noatime,rsize=1048576,wsize=1048576", "192.168.3.106:/volume1/video", "/Users/andy/Volumes/video"]
+    ), "NFS quiet mount plan should carry the options that mounted this NAS by hand, minus resvport (root only) and without pinning the NFS version, so negotiation is unchanged; got \(plan.arguments)")
+}
+
+func testNFSExportParsingReadsTheFirstColumnOfShowmount() throws {
+    let exports = NFSExportResolver.parseExports(showmountOutput: synologyShowmount)
+    try expect(exports == ["/volume1/video", "/volume1/immich-media"], "Expected the two exported paths, got \(exports)")
+    try expect(NFSExportResolver.parseExports(showmountOutput: "Exports list on nas:\n").isEmpty, "A server with no exports has an empty list")
+    try expect(NFSExportResolver.parseExports(showmountOutput: "").isEmpty, "Empty output parses to nothing")
+}
+
+func testNFSResolverFindsTheFullExportPathFromAShareName() throws {
+    let exports = ["/volume1/video", "/volume1/immich-media"]
+    // What the user had: the SMB share name, which the planner turns into "/video".
+    try expect(NFSExportResolver.resolve(requested: "video", exports: exports) == .matched(path: "/volume1/video"), "'video' is the share /volume1/video")
+    try expect(NFSExportResolver.resolve(requested: "/video", exports: exports) == .matched(path: "/volume1/video"), "'/video' is the share /volume1/video")
+    try expect(NFSExportResolver.resolve(requested: "video/精选电视剧", exports: exports) == .matched(path: "/volume1/video/精选电视剧"), "a subfolder keeps its tail")
+    try expect(NFSExportResolver.resolve(requested: "VIDEO", exports: exports) == .matched(path: "/volume1/video"), "matching a name ignores case but returns the server's spelling")
+}
+
+func testNFSResolverLeavesCorrectPathsAlone() throws {
+    let exports = ["/volume1/video", "/volume1/immich-media"]
+    try expect(NFSExportResolver.resolve(requested: "/volume1/video", exports: exports) == .exported(path: "/volume1/video"), "an exported path is used as is")
+    try expect(NFSExportResolver.resolve(requested: "/volume1/video/精选电视剧", exports: exports) == .exported(path: "/volume1/video/精选电视剧"), "a folder inside an export is mountable as is")
+    try expect(NFSExportResolver.resolve(requested: "/volume1/video/", exports: exports) == .exported(path: "/volume1/video"), "trailing slash is ignored")
+}
+
+func testNFSResolverListsExportsWhenNothingMatchesOrItIsAmbiguous() throws {
+    let exports = ["/volume1/video", "/volume1/immich-media"]
+    try expect(NFSExportResolver.resolve(requested: "music", exports: exports) == .notExported(available: exports), "unknown share lists what the server exports")
+    try expect(NFSExportResolver.resolve(requested: "immich", exports: exports) == .notExported(available: exports), "'immich' is not 'immich-media' — no fuzzy guessing")
+    try expect(NFSExportResolver.resolve(requested: "video", exports: ["/volume1/video", "/volume2/video"]) == .ambiguous(candidates: ["/volume1/video", "/volume2/video"]), "two shares named video must not be guessed")
+    try expect(NFSExportResolver.resolve(requested: "video", exports: []) == .notExported(available: []), "a server exporting nothing")
+}
+
+/// The agent mounts unattended, so a misleading failure ("Permission denied") must say what to check.
+func testNFSDiagnosisNamesTheExportsWhenThePathIsNotExported() throws {
+    let exports = ["/volume1/video", "/volume1/immich-media"]
+    let d = NFSMountDiagnostics.diagnose(stderr: issueNFSDenied, requestedPath: "/video", exports: ["/volume1/music"])
+    try expect(d?.key == .errorNFSExportNotFound, "a denied path that is not exported is 'export not found', got \(String(describing: d?.key))")
+    try expect(d?.args == ["/volume1/music"], "the message lists what the server exports, got \(String(describing: d?.args))")
+    let sameNameDifferentPath = NFSMountDiagnostics.diagnose(stderr: issueNFSDenied, requestedPath: "/video", exports: exports)
+    try expect(sameNameDifferentPath?.key == .errorNFSExportNotFound, "/video is not exported even though /volume1/video is")
+}
+
+func testNFSDiagnosisBlamesTheServerRulesWhenThePathIsExported() throws {
+    let denied = "mount_nfs: can't mount /volume1/video from 192.168.3.106 onto /Users/andy/Volumes/video: Permission denied"
+    let withList = NFSMountDiagnostics.diagnose(stderr: denied, requestedPath: "/volume1/video", exports: ["/volume1/video"])
+    try expect(withList?.key == .errorNFSAccessDenied, "an exported path that is still denied is a client-rule / port problem")
+    let noList = NFSMountDiagnostics.diagnose(stderr: issueNFSDenied, requestedPath: "/video", exports: nil)
+    try expect(noList?.key == .errorNFSAccessDenied, "without an export list the message covers every cause, got \(String(describing: noList?.key))")
+}
+
+func testNFSDiagnosisSeparatesLocalPermissionFromServerPermission() throws {
+    // /Volumes is root-owned, and resvport needs root: that is macOS refusing, not the NAS.
+    let local = "mount_nfs: can't mount /volume1/video from 192.168.3.106 onto /Volumes/video: Operation not permitted"
+    try expect(NFSMountDiagnostics.diagnose(stderr: local, requestedPath: "/volume1/video", exports: ["/volume1/video"])?.key == .errorNFSNotPermitted,
+               "'Operation not permitted' is local")
+    try expect(NFSMountDiagnostics.diagnose(stderr: "mount_nfs: can't mount /x from nas: RPC: Program not registered", requestedPath: "/x", exports: nil) == nil,
+               "unrelated errors keep their raw text")
+    try expect(NFSMountDiagnostics.diagnose(stderr: "", requestedPath: "/x", exports: nil) == nil, "no stderr, no diagnosis")
+}
+
+func testNFSDiagnosisMessagesExistInEveryLanguage() throws {
+    for language in [ResolvedLanguage.zh, .en, .ko, .ja, .ru] {
+        let table = L10n.table(language)
+        for key in [L10nKey.errorNFSExportNotFound, .errorNFSAccessDenied, .errorNFSNotPermitted, .editorRemotePathHelpNFS, .statusNFSPathCorrected] {
+            try expect(!(table[key.rawValue] ?? "").isEmpty, "\(language.rawValue) missing \(key.rawValue)")
+        }
+    }
+    try expect(L10n.t(.errorNFSAccessDenied, args: [], in: .zh).contains("/volume1"), "the Chinese hint names the Synology export form")
+    try expect(L10n.t(.errorNFSExportNotFound, args: ["/volume1/video"], in: .en).contains("/volume1/video"), "the export list is interpolated")
+}
+
+/// `showmount -e` hung for over a minute against an unreachable host; nothing may wait on it for that long.
+func testTimedCommandKillsAProcessThatOutlivesItsTimeout() throws {
+    let start = Date()
+    let result = TimedCommand.run(executable: "/bin/sleep", arguments: ["30"], timeout: 0.4)
+    let elapsed = Date().timeIntervalSince(start)
+    try expect(result == nil, "a timed-out command reports nil")
+    try expect(elapsed < 3, "the process must be killed at the timeout, took \(elapsed)s")
+    let ok = TimedCommand.run(executable: "/bin/echo", arguments: ["hi"], timeout: 5)
+    try expect(ok?.exitCode == 0 && ok?.stdout == "hi\n", "a fast command returns its output, got \(String(describing: ok))")
+}
+
+/// The agent mounts with nobody watching, so the alert it records is all the user ever sees. For the real
+/// failure in the report the raw "Permission denied" gave no hint that the path was the problem.
+func testAgentEngineExplainsAnNFSPermissionDenied() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let id = UUID()
+    let config = VolumeConfig(id: id, name: "video", protocolType: .nfs, server: "192.168.3.106", remotePath: "video", username: nil, mountPoint: root.appendingPathComponent("video").path, checkIntervalSeconds: 300, isEnabled: true)
+    let runner = SequenceCommandRunner(results: [CommandResult(exitCode: 13, stdout: "", stderr: issueNFSDenied)])
+    let engine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: InMemoryCredentialStore(), commandRunner: runner, mountPlanner: MountPlanner())
+
+    let status = try engine.check(config)
+
+    guard case .failed(let message, let key, _) = status else {
+        throw ManualTestFailure.failed("Expected a failed status, got \(status)")
+    }
+    try expect(key == L10nKey.errorNFSAccessDenied.rawValue, "The alert should carry the NFS access-denied key, got \(String(describing: key))")
+    try expect(message.contains("/volume1/"), "The English message should tell the user what path form NFS needs, got: \(message)")
+    try expect(!message.contains("mount_nfs:"), "The raw command output should be replaced by the explanation")
+}
+
+func testAgentEngineKeepsRawTextForUnrelatedNFSErrors() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = VolumeConfig(id: UUID(), name: "video", protocolType: .nfs, server: "192.168.3.106", remotePath: "/volume1/video", username: nil, mountPoint: root.appendingPathComponent("video").path, checkIntervalSeconds: 300, isEnabled: true)
+    let runner = SequenceCommandRunner(results: [CommandResult(exitCode: 1, stdout: "", stderr: "mount_nfs: can't mount /volume1/video from 192.168.3.106: RPC: Program not registered")])
+    let engine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: InMemoryCredentialStore(), commandRunner: runner, mountPlanner: MountPlanner())
+
+    let status = try engine.check(config)
+
+    guard case .failed(let message, let key, _) = status else { throw ManualTestFailure.failed("Expected failed, got \(status)") }
+    try expect(key == nil && message.contains("Program not registered"), "An error we cannot explain keeps its raw text, got \(message)")
+}
+
+/// Code review: "Operation not permitted" does not always mean "wrong mount point location". When the mount
+/// point is already inside the user's own folder, telling them to move it there is wrong advice.
+func testNFSDiagnosisOnlyBlamesTheMountPointWhenItIsOutsideTheHomeFolder() throws {
+    let inHome = "mount_nfs: can't mount /volume1/video from 192.168.3.106 onto /Users/andy/Volumes/video: Operation not permitted"
+    try expect(NFSMountDiagnostics.diagnose(stderr: inHome, requestedPath: "/volume1/video", exports: nil, homeDirectory: "/Users/andy") == nil,
+               "a mount point inside the home folder is not the problem; keep the raw error")
+    let system = "mount_nfs: can't mount /volume1/video from 192.168.3.106 onto /Volumes/video: Operation not permitted"
+    try expect(NFSMountDiagnostics.diagnose(stderr: system, requestedPath: "/volume1/video", exports: nil, homeDirectory: "/Users/andy")?.key == .errorNFSNotPermitted,
+               "/Volumes is system-owned: say so")
+    try expect(NFSMountDiagnostics.diagnose(stderr: "mount_nfs: Operation not permitted", requestedPath: "/x", exports: nil, homeDirectory: "/Users/andy")?.key == .errorNFSNotPermitted,
+               "with no mount point in the message, assume the common cause")
+}
+
+/// Code review: the export lookup blocks, so on the main thread it must refuse instead of freezing the UI.
+func testShowmountListerRefusesToBlockTheMainThread() throws {
+    try expect(Thread.isMainThread, "this harness runs on the main thread")
+    let start = Date()
+    let exports = ShowmountExportLister(timeout: 4).exports(host: "192.0.2.1")
+    try expect(exports == nil, "no lookup on the main thread")
+    try expect(Date().timeIntervalSince(start) < 0.5, "and it must return immediately")
+}
+
+/// Code review: a command that writes more than a pipe buffer (64 KB) must not be mistaken for a hang.
+func testTimedCommandHandlesLargeOutput() throws {
+    let result = TimedCommand.run(executable: "/bin/sh", arguments: ["-c", "head -c 300000 /dev/zero | tr '\\0' a"], timeout: 5)
+    try expect(result?.exitCode == 0, "the command finished, got \(String(describing: result))")
+    try expect(result?.stdout.count == 300_000, "all output is captured, got \(result?.stdout.count ?? -1) bytes")
+}
+
 // MARK: - Mount identity (issues #1, #3)
 
 /// Mount table captured in the issue #3 diagnostics (18:57). The configured NFS volume "video" uses
@@ -2280,6 +2445,21 @@ let tests: [(String, () throws -> Void)] = [
     ("ServerHostSet dedupes by hostname and skips disabled", testServerHostSetDedupesByHostnameAndSkipsDisabled),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
+    ("NFS quiet plan uses proven options", testNFSQuietMountPlanUsesTheUsersProvenOptions),
+    ("NFS export parsing", testNFSExportParsingReadsTheFirstColumnOfShowmount),
+    ("NFS resolver finds full export path from share name", testNFSResolverFindsTheFullExportPathFromAShareName),
+    ("NFS resolver leaves correct paths alone", testNFSResolverLeavesCorrectPathsAlone),
+    ("NFS resolver lists exports when unmatched or ambiguous", testNFSResolverListsExportsWhenNothingMatchesOrItIsAmbiguous),
+    ("NFS diagnosis names exports when path not exported", testNFSDiagnosisNamesTheExportsWhenThePathIsNotExported),
+    ("NFS diagnosis blames server rules when path exported", testNFSDiagnosisBlamesTheServerRulesWhenThePathIsExported),
+    ("NFS diagnosis separates local from server permission", testNFSDiagnosisSeparatesLocalPermissionFromServerPermission),
+    ("NFS diagnosis messages in every language", testNFSDiagnosisMessagesExistInEveryLanguage),
+    ("TimedCommand kills a process past its timeout", testTimedCommandKillsAProcessThatOutlivesItsTimeout),
+    ("AgentEngine explains an NFS permission denied", testAgentEngineExplainsAnNFSPermissionDenied),
+    ("AgentEngine keeps raw text for unrelated NFS errors", testAgentEngineKeepsRawTextForUnrelatedNFSErrors),
+    ("NFS diagnosis blames the mount point only outside home", testNFSDiagnosisOnlyBlamesTheMountPointWhenItIsOutsideTheHomeFolder),
+    ("Showmount lister refuses the main thread", testShowmountListerRefusesToBlockTheMainThread),
+    ("TimedCommand handles large output", testTimedCommandHandlesLargeOutput),
     ("AgentEngine clears a dead mount that blocks mount point preparation", testAgentEngineClearsDeadMountThatBlocksMountPointPreparation),
     ("AgentEngine surfaces an unusable mount point after clearing it", testAgentEngineStillReportsAMountPointThatCannotBePreparedEvenAfterUnmount),
     ("NetworkPathFilter ignores peer-to-peer interface flapping", testNetworkPathFilterIgnoresPeerToPeerInterfaceFlapping),

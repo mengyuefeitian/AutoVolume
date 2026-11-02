@@ -128,7 +128,8 @@ swiftc \
   Sources/AutoVolumeShared/NTFSAutoMountService.swift \
   Sources/AutoVolumeShared/UpdateSchedule.swift \
   Sources/AutoVolumeShared/NetworkPathFilter.swift \
-  Sources/AutoVolumeShared/StatusTransitionTracker.swift
+  Sources/AutoVolumeShared/StatusTransitionTracker.swift \
+  Sources/AutoVolumeShared/NFSExports.swift
 
 swiftc \
   -target "$TARGET_ARCH-apple-macosx14.0" \

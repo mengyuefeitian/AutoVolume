@@ -74,7 +74,7 @@ struct VolumeEditorView: View {
                                 .gridCellAnchor(.topLeading)
                             VStack(alignment: .leading, spacing: 4) {
                                 editorTextField(L10n.t(.editorRemotePath), text: $remotePath)
-                                Text(L10n.t(.editorRemotePathHelp))
+                                Text(L10n.t(protocolType == .nfs ? .editorRemotePathHelpNFS : .editorRemotePathHelp))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -164,7 +164,9 @@ struct VolumeEditorView: View {
                 Button(L10n.t(.editorTest)) {
                     Task {
                         await runAsync(status: L10n.t(.statusTesting), closeOnSuccess: false) {
-                            try await viewModel.testConnectionAsync(makeConfig(), password: password.isEmpty ? nil : password)
+                            let (config, note) = await configWithResolvedNFSPath()
+                            let result = try await viewModel.testConnectionAsync(config, password: password.isEmpty ? nil : password)
+                            return joined(note, result)
                         }
                     }
                 }
@@ -173,8 +175,9 @@ struct VolumeEditorView: View {
                 Button(L10n.t(.editorSave)) {
                     Task {
                         await runAsync(status: L10n.t(.statusWorking), closeOnSuccess: true) {
-                            try await viewModel.saveAsync(makeConfig(), password: password.isEmpty ? nil : password)
-                            return L10n.t(.statusSaved)
+                            let (config, note) = await configWithResolvedNFSPath()
+                            try await viewModel.saveAsync(config, password: password.isEmpty ? nil : password)
+                            return joined(note, L10n.t(.statusSaved))
                         }
                     }
                 }
@@ -183,12 +186,12 @@ struct VolumeEditorView: View {
                 Button(L10n.t(.editorSaveAndMount)) {
                     Task {
                         await runAsync(status: L10n.t(.statusMounting), closeOnSuccess: true) {
-                            let config = makeConfig()
+                            let (config, note) = await configWithResolvedNFSPath()
                             try await viewModel.saveAsync(config, password: password.isEmpty ? nil : password)
                             do {
-                                return try await viewModel.mountAsync(config, password: password.isEmpty ? nil : password)
+                                return joined(note, try await viewModel.mountAsync(config, password: password.isEmpty ? nil : password))
                             } catch {
-                                return "\(L10n.t(.statusSaved)) \(error.localizedDescription)"
+                                return joined(note, "\(L10n.t(.statusSaved)) \(error.localizedDescription)")
                             }
                         }
                     }
@@ -201,6 +204,22 @@ struct VolumeEditorView: View {
             .padding(.bottom, 14)
         }
         .padding()
+    }
+
+    /// For NFS, replaces a share name with the server's full export path ("video" -> "/volume1/video")
+    /// in both the field and the config about to be tested/saved, so the saved volume is one the agent
+    /// can actually mount. Any other protocol, or a path that needs no fixing, passes through untouched.
+    @MainActor
+    private func configWithResolvedNFSPath() async -> (VolumeConfig, String?) {
+        var config = makeConfig()
+        guard let corrected = await viewModel.correctedNFSPath(for: config) else { return (config, nil) }
+        remotePath = corrected
+        config.remotePath = corrected
+        return (config, L10n.t(.statusNFSPathCorrected, corrected))
+    }
+
+    private func joined(_ note: String?, _ message: String) -> String {
+        [note, message].compactMap { $0 }.joined(separator: " ")
     }
 
     private func makeConfig() -> VolumeConfig {

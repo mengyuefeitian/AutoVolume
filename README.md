@@ -104,6 +104,16 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 </details>
 
 <details>
+<summary><b>NFS 挂载失败，提示 Permission denied？</b></summary>
+
+- **路径要填服务器导出的完整路径**：群晖是 `/volume1/共享文件夹名`，例如 `/volume1/video`，只写 `video` 不行（只写共享名时，应用会自动到服务器上查找并修正）。
+- **本机 IP 要在该共享的 NFS 权限里**：群晖在「控制面板 → 共享文件夹 → 编辑 → NFS 权限」。
+- **勾选「允许来自非特权端口的连接」**：应用以普通用户身份挂载，无法使用特权端口（`resvport` 只有 root 可用）。
+- 挂载位置请设在自己的目录下（例如 `~/Volumes/video`）；`/Volumes` 属于系统，普通应用无权创建。
+
+</details>
+
+<details>
 <summary><b>出问题了怎么反馈？</b></summary>
 
 右键菜单栏图标 →「导出诊断信息…」，桌面会生成一个 zip 压缩包。请在 [Issues](https://github.com/mengyuefeitian/AutoVolume/issues) 里描述问题并附上这个压缩包。压缩包里**不包含任何密码**，账号名也会被隐去。

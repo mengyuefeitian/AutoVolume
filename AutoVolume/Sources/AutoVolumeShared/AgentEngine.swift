@@ -54,10 +54,24 @@ public final class AgentEngine {
             return .mounted
         }
         guard result.stderr.isEmpty else {
-            // Raw command stderr, not a fixed sentence — nothing to key.
-            return .failed(message: result.stderr)
+            return failedStatus(for: config, stderr: result.stderr)
         }
         return mountCommandFailedStatus(exitCode: result.exitCode)
+    }
+
+    /// Raw command stderr, unless it is an NFS failure we can explain. This runs unattended on every
+    /// check, so it deliberately does no network lookup: without the server's export list the message
+    /// covers every cause ("Permission denied" is also what a wrongly typed export path produces).
+    private func failedStatus(for config: VolumeConfig, stderr: String) -> VolumeStatus {
+        if config.protocolType == .nfs,
+           let diagnosis = NFSMountDiagnostics.diagnose(stderr: stderr, requestedPath: config.remotePath, exports: nil) {
+            return .failed(
+                message: L10n.t(diagnosis.key, args: diagnosis.args, in: .en),
+                key: diagnosis.key.rawValue,
+                args: diagnosis.args
+            )
+        }
+        return .failed(message: stderr)
     }
 
     /// A dead mount that still occupies the mount point makes the directory impossible to create
@@ -101,7 +115,7 @@ public final class AgentEngine {
         let result = try runMount(config: config, password: password)
         guard result.exitCode == 0 else {
             guard result.stderr.isEmpty else {
-                return .failed(message: result.stderr)
+                return failedStatus(for: config, stderr: result.stderr)
             }
             return mountCommandFailedStatus(exitCode: result.exitCode)
         }

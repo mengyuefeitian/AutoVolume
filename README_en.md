@@ -98,6 +98,16 @@ Writing to NTFS needs a small driver (based on open-source ntfs-3g and FUSE-T, w
 </details>
 
 <details>
+<summary><b>NFS fails with "Permission denied"</b></summary>
+
+- **Use the server's full export path**: on Synology that is `/volume1/<shared folder>`, for example `/volume1/video`; `video` alone does not work (if you enter only a share name, the app looks the full path up on the server and corrects it).
+- **This Mac's IP must be in the share's NFS permissions** (DSM: Control Panel → Shared Folder → Edit → NFS Permissions).
+- **Enable "Allow connections from non-privileged ports"**: the app mounts as a normal user and cannot use a reserved port (`resvport` is root-only).
+- Keep the mount point inside your own folder (for example `~/Volumes/video`); `/Volumes` belongs to the system and apps cannot create folders there.
+
+</details>
+
+<details>
 <summary><b>How do I report a problem?</b></summary>
 
 Right-click the menu bar icon → "Export Diagnostics…". A zip appears on your Desktop. Open an [issue](https://github.com/mengyuefeitian/AutoVolume/issues), describe the problem and attach the zip. It **never contains passwords**, and account names are hidden.

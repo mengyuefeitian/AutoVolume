@@ -1,3 +1,13 @@
+# NetDiskMount 1.0.2 Release Notes
+
+Fixes NFS volumes that could not connect.
+
+- NFS needs the server's full export path (a Synology exports `/volume1/video`, not `video`). The app used to send `/video` and the server answered "Permission denied", which looks like a permissions problem. Entering just a share name now resolves to the exported path automatically (in the editor, and when a saved volume fails to mount), and the corrected path is saved.
+- The remote-path help now explains the NFS form, and a failed NFS mount says what to check (path, client IP, non-privileged ports) or why macOS refused the mount point, instead of the raw error.
+- NFS mounts use the options that mounted a Synology by hand (`nolocks,noowners,noatime`, 1 MB blocks).
+
+---
+
 # NetDiskMount 1.0.0 Release Notes
 
 AutoVolume is now **NetDiskMount**: the name says what the app does, and the old one was often mistaken for a volume-control tool. This is also the first 1.0 release, with fixes for the problems reported in issues #1, #2 and #3.

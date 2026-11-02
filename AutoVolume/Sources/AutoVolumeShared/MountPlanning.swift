@@ -142,7 +142,11 @@ public struct MountPlanner {
                 arguments: ["-s", try urlString(scheme: "afp", config: config, includeUser: true, password: password), config.mountPoint]
             )
         case .nfs:
-            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["-o", "soft", "\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
+            // The options that mounted a Synology by hand (nolocks: no lockd needed on the NAS; noowners:
+            // ignore UID differences; large blocks for throughput). `resvport` is left out on purpose:
+            // mount_nfs only allows it for root, and this runs as the user. The NFS version is not
+            // pinned: the OS default (try 3, then 2) is what these volumes used before.
+            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["-o", "soft,nolocks,noowners,noatime,rsize=1048576,wsize=1048576", "\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
         }
     }
 
