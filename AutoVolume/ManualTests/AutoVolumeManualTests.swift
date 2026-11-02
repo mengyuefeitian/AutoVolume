@@ -294,6 +294,85 @@ func testAutoVolumeLoggerRetentionAndSizeLimit() throws {
     try expect(size <= 160, "Logger should keep the file under the configured size limit")
 }
 
+/// Issue #3 ("first click on the volume list after a quiet spell freezes the UI for 5-30s"). The
+/// Agent's `network-path-changed` loop inflated AutoVolume.log to ~88k lines; the app's first log
+/// write after ≥60s of silence ("Opened volume list", on the main thread) ran the retention prune,
+/// which parsed every line with ISO8601DateFormatter — ~0.3s per 6000 lines, i.e. ~5s here — and
+/// the next clicks were instant only because the 60s throttle skipped the prune. A write must stay
+/// cheap however long the log has grown.
+func testAutoVolumeLoggerFirstWriteIntoHugeLogStaysFast() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let logger = AutoVolumeLogger(directory: directory)
+
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = .current
+    let now = Date()
+    let seededLineCount = 88_000
+    var seeded = ""
+    seeded.reserveCapacity(seededLineCount * 80)
+    for index in 0..<seededLineCount {
+        let date = now.addingTimeInterval(-Double(index) * 6)
+        seeded += "\(formatter.string(from: date)) [INFO] Agent check mounted for video\n"
+    }
+    try FileManager.default.createDirectory(at: logger.logDirectoryURL, withIntermediateDirectories: true)
+    try Data(seeded.utf8).write(to: logger.logFileURL)
+
+    let start = Date()
+    logger.write(level: "INFO", message: "Opened volume list", date: now)
+    let elapsed = Date().timeIntervalSince(start)
+    print("  first write into \(seededLineCount)-line log: \(elapsed)s")
+
+    try expect(
+        elapsed < 0.5,
+        "First write() into an \(seededLineCount)-line log took \(elapsed)s — on the main thread this is the multi-second UI freeze from issue #3"
+    )
+}
+
+/// Retention must drop exactly the expired suffix of a newest-first log — no more, no less — and do it
+/// without parsing the in-window lines (that was the cost behind issue #3).
+func testAutoVolumeLoggerPruneDropsOnlyExpiredSuffixOfHugeLog() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let logger = AutoVolumeLogger(directory: directory, retentionInterval: 3_600)
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = .current
+    let now = Date()
+    // One line per second going back 80,000s: the newest 3,600 are inside the 1h window.
+    var seeded = ""
+    for index in 0..<80_000 {
+        seeded += "\(formatter.string(from: now.addingTimeInterval(-Double(index)))) [INFO] line \(index)\n"
+    }
+    try FileManager.default.createDirectory(at: logger.logDirectoryURL, withIntermediateDirectories: true)
+    try Data(seeded.utf8).write(to: logger.logFileURL)
+
+    let start = Date()
+    try logger.prune(now: now)
+    let elapsed = Date().timeIntervalSince(start)
+
+    let lines = try String(contentsOf: logger.logFileURL, encoding: .utf8).split(separator: "\n")
+    try expect(lines.first?.hasSuffix("line 0") == true, "Newest line must survive pruning, got \(lines.first ?? "nil")")
+    try expect(lines.last?.hasSuffix("line 3600") == true || lines.last?.hasSuffix("line 3599") == true,
+               "Oldest kept line must sit at the retention boundary, got \(lines.last ?? "nil")")
+    try expect(lines.count >= 3_600 && lines.count <= 3_601, "Expected ~3600 in-window lines, got \(lines.count)")
+    try expect(elapsed < 1.0, "Pruning 76k expired lines took \(elapsed)s")
+}
+
+func testAutoVolumeLoggerPruneKeepsLinesItCannotDate() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let logger = AutoVolumeLogger(directory: directory, retentionInterval: 60)
+    try FileManager.default.createDirectory(at: logger.logDirectoryURL, withIntermediateDirectories: true)
+    try Data("not-a-timestamp stray line\n".utf8).write(to: logger.logFileURL)
+
+    try logger.prune(now: Date())
+
+    let text = try String(contentsOf: logger.logFileURL, encoding: .utf8)
+    try expect(text.contains("stray line"), "Lines without a parseable timestamp must never be discarded")
+}
+
 /// Reproduces the reported "settings takes 3+ seconds to open, main-thread stalls get worse
 /// the longer AutoVolume has been running without a restart" bug. `write()` used to re-parse
 /// every existing line's ISO8601 timestamp and re-sort the whole file (twice, via a duplicated
@@ -340,17 +419,23 @@ func testAutoVolumeLoggerWriteStaysFastAsLogGrowsOverDays() throws {
         "A single write() call took \(elapsed)s against a \(seededLineCount)-line log — cost must not scale with total accumulated log history"
     )
 
-    // The actual property under test: the throttle has to hold, so a second write
-    // inside the 60s window must not pay for another prune. This is a ratio between
-    // two calls measured milliseconds apart on the same machine, so unlike the
-    // absolute ceiling above it is not sensitive to system load.
-    let secondStart = Date()
+    // The throttle itself, checked by behaviour instead of by timing: a prune is cheap now, so a
+    // first-vs-second wall-clock ratio no longer says anything. Plant an expired line at the tail
+    // after the first write has pruned; a second write inside the 60s window must leave it alone
+    // (no prune), and a write after the window must remove it.
+    let expiredLine = "\(formatter.string(from: now.addingTimeInterval(-8 * 24 * 3_600))) [INFO] expired marker\n"
+    let handle = try FileHandle(forWritingTo: logger.logFileURL)
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data(expiredLine.utf8))
+    try handle.close()
+
     logger.write(level: "INFO", message: "Opened settings again", date: now.addingTimeInterval(1))
-    let secondElapsed = Date().timeIntervalSince(secondStart)
-    try expect(
-        secondElapsed < elapsed / 2.0,
-        "Second write() took \(secondElapsed)s vs \(elapsed)s for the first — the 60s auto-prune throttle is not holding, so cost still scales with log history"
-    )
+    var text = try String(contentsOf: logger.logFileURL, encoding: .utf8)
+    try expect(text.contains("expired marker"), "A second write inside the 60s window must not prune — the auto-prune throttle is not holding")
+
+    logger.write(level: "INFO", message: "Opened settings much later", date: now.addingTimeInterval(61))
+    text = try String(contentsOf: logger.logFileURL, encoding: .utf8)
+    try expect(!text.contains("expired marker"), "A write after the 60s window must run the retention prune and drop the expired line")
 }
 
 func testServerHostSetDedupesByHostnameAndSkipsDisabled() throws {
@@ -436,6 +521,282 @@ func testAgentEngineDecisions() throws {
     try expect(reconnectStatus == .mounted, "Reconnect should remount after a network outage")
     try expect(reconnectRunner.plans.map(\.executable) == ["/usr/sbin/diskutil", "/sbin/umount", "/sbin/mount_smbfs"], "Reconnect command order mismatch")
 
+}
+
+// MARK: - Stale mounts, agent log spam (issues #1, #2, #3)
+
+/// `FileManager` whose `createDirectory` fails the first `failures` times, the way it does when a dead
+/// mount still occupies the mount point ("The file “video” couldn’t be saved in the folder “Volumes”").
+final class FlakyCreateDirectoryFileManager: FileManager {
+    var remainingFailures: Int
+    init(failures: Int) {
+        self.remainingFailures = failures
+        super.init()
+    }
+    override func createDirectory(at url: URL, withIntermediateDirectories createIntermediates: Bool, attributes: [FileAttributeKey: Any]? = nil) throws {
+        if remainingFailures > 0 {
+            remainingFailures -= 1
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.createDirectory(at: url, withIntermediateDirectories: createIntermediates, attributes: attributes)
+    }
+}
+
+/// Issue #2: after a network blip the SMB mount went stale, the mount point could no longer be prepared,
+/// and the agent logged the same createDirectory error every cycle for an hour — until a reboot.
+func testAgentEngineClearsDeadMountThatBlocksMountPointPreparation() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let id = UUID()
+    let config = VolumeConfig(id: id, name: "video", protocolType: .smb, server: "nas.local", remotePath: "video", username: "mei", mountPoint: root.appendingPathComponent("video").path, checkIntervalSeconds: 300, isEnabled: true)
+    let credentials = InMemoryCredentialStore()
+    try credentials.savePassword("secret", for: id)
+    let runner = RecordingCommandRunner()
+    let engine = AgentEngine(
+        mountState: FakeMountStateProvider(isMounted: false),
+        credentialStore: credentials,
+        commandRunner: runner,
+        mountPlanner: MountPlanner(),
+        mountExposure: MountExposure(fileManager: FlakyCreateDirectoryFileManager(failures: 1)),
+        mountTable: SystemMountTable(mountOutput: "//mei@nas.local/video on \(config.mountPoint) (smbfs, nodev, nosuid, mounted by mei)\n")
+    )
+
+    let status = try engine.check(config)
+
+    try expect(status == .mounted, "A blocked mount point should be cleared and the volume mounted, got \(status)")
+    try expect(runner.plans.map(\.executable) == ["/usr/sbin/diskutil", "/sbin/umount", "/sbin/mount_smbfs"],
+               "Expected unmount, force unmount, then mount; got \(runner.plans.map(\.executable))")
+}
+
+func testAgentEngineStillReportsAMountPointThatCannotBePreparedEvenAfterUnmount() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let id = UUID()
+    let config = VolumeConfig(id: id, name: "video", protocolType: .smb, server: "nas.local", remotePath: "video", username: "mei", mountPoint: root.appendingPathComponent("video").path, checkIntervalSeconds: 300, isEnabled: true)
+    let credentials = InMemoryCredentialStore()
+    try credentials.savePassword("secret", for: id)
+    let runner = RecordingCommandRunner()
+    let engine = AgentEngine(
+        mountState: FakeMountStateProvider(isMounted: false),
+        credentialStore: credentials,
+        commandRunner: runner,
+        mountPlanner: MountPlanner(),
+        mountExposure: MountExposure(fileManager: FlakyCreateDirectoryFileManager(failures: 2)),
+        mountTable: SystemMountTable(mountOutput: "//mei@nas.local/video on \(config.mountPoint) (smbfs, nodev, nosuid, mounted by mei)\n")
+    )
+
+    var thrown = false
+    do { _ = try engine.check(config) } catch { thrown = true }
+
+    try expect(thrown, "If the mount point is still unusable after clearing it, the error must surface instead of being swallowed")
+    try expect(!runner.plans.map(\.executable).contains("/sbin/mount_smbfs"), "No mount should be attempted onto an unusable mount point")
+}
+
+/// Issue #2/#3: NWPathMonitor reported ~29,000 "changes" a week on a machine whose network never changed
+/// (AWDL / low-latency-WLAN interfaces flap constantly); each one ran a full check and wrote log lines.
+func testNetworkPathFilterIgnoresPeerToPeerInterfaceFlapping() throws {
+    var filter = NetworkPathChangeFilter()
+    let wifi = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en0", type: "wifi")])
+    let wifiWithAwdl = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en0", type: "wifi"), .init(name: "awdl0", type: "other")])
+    let wifiWithLlw = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "llw0", type: "other"), .init(name: "en0", type: "wifi")])
+
+    try expect(filter.shouldTrigger(for: wifi), "The first path update must trigger a check")
+    try expect(!filter.shouldTrigger(for: wifiWithAwdl), "AWDL appearing is not a network change")
+    try expect(!filter.shouldTrigger(for: wifi), "AWDL disappearing is not a network change")
+    try expect(!filter.shouldTrigger(for: wifiWithLlw), "llw0 flapping is not a network change")
+    try expect(!filter.shouldTrigger(for: wifi), "an identical update is not a change")
+}
+
+func testNetworkPathFilterTriggersOnRealChanges() throws {
+    var filter = NetworkPathChangeFilter()
+    let wifi = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en0", type: "wifi")])
+    let wifiAndVPN = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en0", type: "wifi"), .init(name: "utun4", type: "other")])
+    let offline = NetworkPathSignature(status: "unsatisfied", interfaces: [])
+    let ethernet = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en5", type: "wiredEthernet")])
+
+    _ = filter.shouldTrigger(for: wifi)
+    try expect(filter.shouldTrigger(for: wifiAndVPN), "A VPN coming up can make the NAS reachable")
+    try expect(filter.shouldTrigger(for: wifi), "VPN going down")
+    try expect(filter.shouldTrigger(for: offline), "Going offline")
+    try expect(filter.shouldTrigger(for: ethernet), "Coming back on a different interface")
+}
+
+func testNetworkPathFilterTreatsInterfaceOrderAsIrrelevant() throws {
+    var filter = NetworkPathChangeFilter()
+    let a = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en0", type: "wifi"), .init(name: "en5", type: "wiredEthernet")])
+    let b = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en5", type: "wiredEthernet"), .init(name: "en0", type: "wifi")])
+    _ = filter.shouldTrigger(for: a)
+    try expect(!filter.shouldTrigger(for: b), "The same interfaces in a different order are the same network")
+}
+
+/// "Agent check mounted for X" used to be written on every check — 29,000+ lines a week, 6.5MB of log
+/// that buried everything useful. Only a change of state is worth a line.
+func testStatusTransitionTrackerLogsOnlyChanges() throws {
+    var tracker = StatusTransitionTracker()
+    let a = UUID()
+    let b = UUID()
+
+    try expect(tracker.shouldLog(volumeID: a, state: "mounted"), "first observation is news")
+    try expect(!tracker.shouldLog(volumeID: a, state: "mounted"), "unchanged is not")
+    try expect(!tracker.shouldLog(volumeID: a, state: "mounted"), "still unchanged")
+    try expect(tracker.shouldLog(volumeID: b, state: "mounted"), "volumes are tracked independently")
+    try expect(tracker.shouldLog(volumeID: a, state: "failed: boom"), "a failure is news")
+    try expect(!tracker.shouldLog(volumeID: a, state: "failed: boom"), "the same failure repeating is not")
+    try expect(tracker.shouldLog(volumeID: a, state: "failed: different"), "a different failure is")
+    try expect(tracker.shouldLog(volumeID: a, state: "mounted"), "recovery is news")
+}
+
+/// Code review finding: the recovery must only unmount what is mounted at the path that could not be
+/// prepared. A healthy mount of the same share somewhere else (Finder's /Volumes/foo) belongs to the
+/// user and must never be force-ejected because an unrelated createDirectory error happened.
+func testAgentEngineDoesNotUnmountAnythingWhenNothingIsMountedAtTheFailingPath() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let id = UUID()
+    let config = VolumeConfig(id: id, name: "video", protocolType: .nfs, server: "192.168.3.106", remotePath: "video", username: nil, mountPoint: root.appendingPathComponent("video").path, checkIntervalSeconds: 300, isEnabled: true)
+    let credentials = InMemoryCredentialStore()
+    let runner = RecordingCommandRunner()
+    let engine = AgentEngine(
+        mountState: FakeMountStateProvider(isMounted: false),
+        credentialStore: credentials,
+        commandRunner: runner,
+        mountPlanner: MountPlanner(),
+        mountExposure: MountExposure(fileManager: FlakyCreateDirectoryFileManager(failures: 1)),
+        mountTable: SystemMountTable(mountOutput: "192.168.3.106:/video on /Volumes/foo (nfs, nodev, nosuid, mounted by andy)\n")
+    )
+
+    var thrown = false
+    do { _ = try engine.check(config) } catch { thrown = true }
+
+    try expect(thrown, "The preparation error must surface")
+    try expect(runner.plans.isEmpty, "Nothing is mounted at the failing path, so nothing may be unmounted — got \(runner.plans.map(\.executable))")
+}
+
+/// Code review finding: switching Wi-Fi network / subnet on the same interface is a real change.
+func testNetworkPathFilterTriggersWhenTheGatewayChangesOnTheSameInterface() throws {
+    var filter = NetworkPathChangeFilter()
+    let home = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en0", type: "wifi")], gateways: ["192.168.3.1"])
+    let office = NetworkPathSignature(status: "satisfied", interfaces: [.init(name: "en0", type: "wifi")], gateways: ["10.0.0.1"])
+    _ = filter.shouldTrigger(for: home)
+    try expect(filter.shouldTrigger(for: office), "A different gateway on the same interface is a different network")
+    try expect(!filter.shouldTrigger(for: office), "but repeating it is not news")
+}
+
+/// Code review finding: the tracker must also learn about states that are not logged, otherwise a volume
+/// that goes mounted → unmounted → mounted never logs the second "mounted".
+func testStatusTransitionTrackerNoticesRecoveryAfterUnloggedStates() throws {
+    var tracker = StatusTransitionTracker()
+    let id = UUID()
+    try expect(tracker.shouldLog(volumeID: id, state: "mounted"), "first mount")
+    _ = tracker.shouldLog(volumeID: id, state: "unmounted")
+    try expect(tracker.shouldLog(volumeID: id, state: "mounted"), "mounting again after an unmount is news")
+}
+
+/// Code review finding: when `mount` itself fails, the table must say so once instead of re-running it.
+func testSystemMountTableReportsUnreadableTableInsteadOfEmpty() throws {
+    let unreadable = SystemMountTable(unavailable: true)
+    let config = VolumeConfig(name: "v", protocolType: .smb, server: "nas", remotePath: "share", username: nil, mountPoint: "/Users/x/Volumes/v", checkIntervalSeconds: 300, isEnabled: true)
+    try expect(unreadable.entries(matching: config) == nil, "An unreadable mount table must be reported as nil, not as 'nothing mounted'")
+    try expect(unreadable.snapshot().entries(matching: config) == nil, "snapshot() of an unreadable table stays unreadable")
+}
+
+/// Code review finding: IPv6 literals and bracketed hosts.
+func testMountStateHandlesIPv6AndBracketedHosts() throws {
+    let nfsOutput = "[fe80::1]:/video on /Users/x/Volumes/video (nfs, nodev, nosuid, mounted by x)\n"
+    let nfs = volume(.nfs, server: "[fe80::1]", remote: "video", at: "/Users/x/Volumes/video")
+    try expect(mountedState(nfsOutput).isMounted(config: nfs), "A bracketed IPv6 NFS source must be parsed as host fe80::1, not 'fe80'")
+    let smbOutput = "//u@[fe80::1]/share on /Users/x/Volumes/share (smbfs, nodev, nosuid, mounted by x)\n"
+    let smb = volume(.smb, server: "[fe80::1]", remote: "share", at: "/Users/x/Volumes/share")
+    try expect(mountedState(smbOutput).isMounted(config: smb), "A bracketed IPv6 SMB source must match")
+}
+
+// MARK: - Mount identity (issues #1, #3)
+
+/// Mount table captured in the issue #3 diagnostics (18:57). The configured NFS volume "video" uses
+/// mount point /Users/andy/Volumes/video — which is occupied by an *SMB* mount of the same share.
+private let issue3MountOutput = """
+//anweining@192.168.3.100/video on /Volumes/video (smbfs, nodev, nosuid, mounted by andy)
+//anweining@192.168.3.106/video on /Users/andy/Volumes/video (smbfs, nodev, nosuid, mounted by andy)
+//anweining@192.168.3.106/home on /Users/andy/Volumes/home (smbfs, nodev, nosuid, mounted by andy)
+//anweining@192.168.3.100/homes on /Volumes/homes (smbfs, nodev, nosuid, mounted by andy)
+//anweining@192.168.3.106/homes on /Volumes/homes-1 (smbfs, nodev, nosuid, mounted by andy)
+"""
+
+private func mountedState(_ output: String) -> FileSystemMountStateProvider {
+    FileSystemMountStateProvider(mountTable: SystemMountTable(mountOutput: output), validatesResponsiveness: false)
+}
+
+private func volume(_ protocolType: VolumeProtocol, server: String, remote: String, at mountPoint: String) -> VolumeConfig {
+    VolumeConfig(name: "v", protocolType: protocolType, server: server, remotePath: remote, username: "u", mountPoint: mountPoint, checkIntervalSeconds: 300, isEnabled: true)
+}
+
+/// Issue #3: "NFS says mount failed but the list shows it mounted". The path is mounted — by SMB.
+func testMountStateDoesNotTreatForeignMountAtSamePathAsMounted() throws {
+    let nfs = volume(.nfs, server: "192.168.3.106", remote: "video", at: "/Users/andy/Volumes/video")
+    let smb = volume(.smb, server: "192.168.3.106", remote: "video", at: "/Users/andy/Volumes/video")
+    let state = mountedState(issue3MountOutput)
+
+    try expect(!state.isMounted(config: nfs), "An SMB mount sitting on the NFS volume's mount point must not make the NFS volume look mounted")
+    try expect(state.isMounted(config: smb), "The SMB volume really is mounted at its mount point")
+}
+
+func testMountStateRequiresTheSameServerNotJustTheSameShareName() throws {
+    // 192.168.3.100 also has a "video" share, mounted by Finder at /Volumes/video.
+    let state = mountedState(issue3MountOutput)
+    let wrongServer = volume(.smb, server: "192.168.3.100", remote: "video", at: "/Users/andy/Volumes/video")
+    try expect(!state.isMounted(config: wrongServer), "Same share name on a different server is a different volume")
+}
+
+func testMountStateMatchesShareNamesExactly() throws {
+    let state = mountedState(issue3MountOutput)
+    // "home" must not match "homes", and "homes" must not match "home".
+    let home100 = volume(.smb, server: "192.168.3.100", remote: "home", at: "/Volumes/homes")
+    try expect(!state.isMounted(config: home100), "'home' must not be satisfied by the 'homes' share")
+    let homes106 = volume(.smb, server: "192.168.3.106", remote: "homes", at: "/Volumes/homes-1")
+    try expect(state.isMounted(config: homes106), "'homes' on 106 is mounted at /Volumes/homes-1")
+    let homes106Elsewhere = volume(.smb, server: "192.168.3.106", remote: "homes", at: "/Users/andy/Volumes/homes")
+    try expect(!state.isMounted(config: homes106Elsewhere), "A share mounted somewhere else is not mounted at this volume's mount point")
+}
+
+func testMountStateIgnoresShareNameAppearingInTheMountPointPath() throws {
+    let output = "//anweining@192.168.3.100/homes on /Users/andy/Volumes/video (smbfs, nodev, nosuid, mounted by andy)\n"
+    let video = volume(.smb, server: "192.168.3.100", remote: "video", at: "/Users/andy/Volumes/video")
+    try expect(!mountedState(output).isMounted(config: video), "Only the share in the mount *source* counts, not text in the mount point path")
+}
+
+func testMountStateDoesNotConfuseHostsThatShareAPrefix() throws {
+    let output = "//u@192.168.3.100/video on /Users/andy/Volumes/video (smbfs, nodev, nosuid, mounted by andy)\n"
+    let video = volume(.smb, server: "192.168.3.10", remote: "video", at: "/Users/andy/Volumes/video")
+    try expect(!mountedState(output).isMounted(config: video), "192.168.3.10 is not 192.168.3.100")
+}
+
+func testMountStateNFSMountMatchesByExportPath() throws {
+    let output = "192.168.3.106:/video on /Users/andy/Volumes/video (nfs, nodev, nosuid, mounted by andy)\n"
+    let nfs = volume(.nfs, server: "192.168.3.106", remote: "video", at: "/Users/andy/Volumes/video")
+    let other = volume(.nfs, server: "192.168.3.106", remote: "music", at: "/Users/andy/Volumes/video")
+    try expect(mountedState(output).isMounted(config: nfs), "A real NFS mount of the configured export is mounted")
+    try expect(!mountedState(output).isMounted(config: other), "A different export is not mounted")
+}
+
+func testMountStateWebDAVIsMatchedWhereverTheSystemMountedIt() throws {
+    let output = "https://mei@dav.example.com/dav/files on /Volumes/files (webdav, nodev, nosuid, mounted by mei)\n"
+    let dav = volume(.webdav, server: "https://dav.example.com", remote: "dav/files", at: "/Users/x/Volumes/files")
+    try expect(mountedState(output).isMounted(config: dav), "WebDAV mount points are chosen by the system, so any matching mount counts")
+    let otherPath = volume(.webdav, server: "https://dav.example.com", remote: "dav/other", at: "/Users/x/Volumes/files")
+    try expect(!mountedState(output).isMounted(config: otherPath), "A different WebDAV path is a different volume")
+}
+
+func testMountStateSMBWithSubpathUsesTheBackingMountPoint() throws {
+    var zhen = volume(.smb, server: "192.168.3.100", remote: "homes/lixiaozhen/autoprint", at: "/Users/andy/Volumes/zhen")
+    zhen.id = UUID(uuidString: "3472E3A1-F4F7-419E-AA48-15417AC9BDAB")!
+    let output = "//anweining@192.168.3.100/homes on /Users/andy/Volumes/.AutoVolumeBacking/3472E3A1-F4F7-419E-AA48-15417AC9BDAB (smbfs, nodev, nosuid, mounted by andy)\n"
+    try expect(mountedState(output).isMounted(config: zhen), "A subpath SMB volume is mounted at its .AutoVolumeBacking directory, matched by the share (first path component)")
+}
+
+func testMountStateEmptySMBRemotePathMatchesAnyShareOnTheServer() throws {
+    let output = "//user@nas.example.test/share on /Users/example/Volumes/Router (smbfs, nodev, nosuid, mounted by user)\n"
+    let server = volume(.smb, server: "nas.example.test", remote: "", at: "/Users/example/Volumes/Router")
+    try expect(mountedState(output).isMounted(config: server), "An empty SMB remote path keeps matching any share on the server")
 }
 
 func testSystemMountTableMatchesServerMounts() throws {
@@ -1913,9 +2274,32 @@ let tests: [(String, () throws -> Void)] = [
     ("PathHealthProbe", testPathHealthProbe),
     ("AutoVolumeLogger", testAutoVolumeLoggerRetentionAndSizeLimit),
     ("AutoVolumeLogger write() stays fast as log grows over days", testAutoVolumeLoggerWriteStaysFastAsLogGrowsOverDays),
+    ("AutoVolumeLogger first write into huge log stays fast", testAutoVolumeLoggerFirstWriteIntoHugeLogStaysFast),
+    ("AutoVolumeLogger prune drops only expired suffix of huge log", testAutoVolumeLoggerPruneDropsOnlyExpiredSuffixOfHugeLog),
+    ("AutoVolumeLogger prune keeps undatable lines", testAutoVolumeLoggerPruneKeepsLinesItCannotDate),
     ("ServerHostSet dedupes by hostname and skips disabled", testServerHostSetDedupesByHostnameAndSkipsDisabled),
     ("AgentEngine decisions", testAgentEngineDecisions),
     ("SystemMountTable", testSystemMountTableMatchesServerMounts),
+    ("AgentEngine clears a dead mount that blocks mount point preparation", testAgentEngineClearsDeadMountThatBlocksMountPointPreparation),
+    ("AgentEngine surfaces an unusable mount point after clearing it", testAgentEngineStillReportsAMountPointThatCannotBePreparedEvenAfterUnmount),
+    ("NetworkPathFilter ignores peer-to-peer interface flapping", testNetworkPathFilterIgnoresPeerToPeerInterfaceFlapping),
+    ("NetworkPathFilter triggers on real changes", testNetworkPathFilterTriggersOnRealChanges),
+    ("NetworkPathFilter ignores interface order", testNetworkPathFilterTreatsInterfaceOrderAsIrrelevant),
+    ("StatusTransitionTracker logs only changes", testStatusTransitionTrackerLogsOnlyChanges),
+    ("AgentEngine unmounts nothing when nothing is mounted at the failing path", testAgentEngineDoesNotUnmountAnythingWhenNothingIsMountedAtTheFailingPath),
+    ("NetworkPathFilter triggers on gateway change", testNetworkPathFilterTriggersWhenTheGatewayChangesOnTheSameInterface),
+    ("StatusTransitionTracker notices recovery after unlogged states", testStatusTransitionTrackerNoticesRecoveryAfterUnloggedStates),
+    ("SystemMountTable reports unreadable table", testSystemMountTableReportsUnreadableTableInsteadOfEmpty),
+    ("MountState handles IPv6 and bracketed hosts", testMountStateHandlesIPv6AndBracketedHosts),
+    ("MountState ignores a foreign mount at the same path (NFS vs SMB)", testMountStateDoesNotTreatForeignMountAtSamePathAsMounted),
+    ("MountState requires the same server", testMountStateRequiresTheSameServerNotJustTheSameShareName),
+    ("MountState matches share names exactly", testMountStateMatchesShareNamesExactly),
+    ("MountState ignores share name in mount point path", testMountStateIgnoresShareNameAppearingInTheMountPointPath),
+    ("MountState does not confuse hosts sharing a prefix", testMountStateDoesNotConfuseHostsThatShareAPrefix),
+    ("MountState NFS matches by export path", testMountStateNFSMountMatchesByExportPath),
+    ("MountState WebDAV matched wherever mounted", testMountStateWebDAVIsMatchedWhereverTheSystemMountedIt),
+    ("MountState SMB subpath uses backing mount point", testMountStateSMBWithSubpathUsesTheBackingMountPoint),
+    ("MountState empty SMB remote path matches any share", testMountStateEmptySMBRemotePathMatchesAnyShareOnTheServer),
     ("FinderRevealPlanning", testFinderRevealPlanning),
     ("CheckScheduler", testCheckScheduler),
     ("AlertStore", testAlertStore),

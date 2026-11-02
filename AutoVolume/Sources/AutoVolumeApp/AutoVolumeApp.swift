@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let updateService = UpdateService()
         self.updateService = updateService
         statusBarController = StatusBarController(viewModel: sharedAutoVolumeViewModel, updateService: updateService)
-        AutoVolumeLogger.shared.info("AutoVolume launched")
+        AutoVolumeLogger.shared.info("NetDiskMount launched")
     }
 
     /// Loads persisted settings, migrates the legacy pre-`AppSettings.language`
@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        AutoVolumeLogger.shared.info("AutoVolume terminating")
+        AutoVolumeLogger.shared.info("NetDiskMount terminating")
         LaunchAgentInstaller.stop()
     }
 }

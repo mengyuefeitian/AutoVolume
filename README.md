@@ -1,12 +1,14 @@
 <div align="center">
 
-<img src="docs/assets/autovolume-icon.png" width="128" alt="AutoVolume icon">
+<img src="docs/assets/autovolume-icon.png" width="128" alt="NetDiskMount icon">
 
-# AutoVolume 智卷
+# NetDiskMount
 
-**让 NAS、网盘和移动硬盘在 Mac 上「一直在线」的菜单栏小工具**
+**让 NAS、网盘和移动硬盘在 Mac 上「一直在线」的菜单栏小工具 —— 网络磁盘自动挂载 / 断线重连**
 
 断网、休眠、换 Wi‑Fi 之后，自动帮你把网络文件夹重新挂回来；NTFS 移动硬盘插上就能直接读写。
+
+> 1.0 起正式命名为 **NetDiskMount**（原名 AutoVolume / 智卷，容易被误认为是调整音量的工具）。已安装旧版的用户可以直接通过自动更新升级，配置和密码都会保留。
 
 [![Download](https://img.shields.io/github/v/release/mengyuefeitian/AutoVolume?label=%E4%B8%8B%E8%BD%BD&style=flat-square)](https://github.com/mengyuefeitian/AutoVolume/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
@@ -25,7 +27,7 @@
 
 每天打开 Mac，NAS 上的文件夹又断开了？挂载 WebDAV 网盘要重新输一遍地址和密码？插上 Windows 用的移动硬盘却只能看不能写？
 
-AutoVolume 住在菜单栏里，把这些麻烦都自动处理掉：
+NetDiskMount 住在菜单栏里，把这些麻烦都自动处理掉：
 
 - 🔁 **自动重连**：网络断了又恢复、Mac 从睡眠醒来之后，自动把网络文件夹重新挂上，不用再手动在 Finder 里「连接服务器」。
 - 🗂 **一次配置，长期可用**：服务器地址、账号、密码、挂载位置保存一次就好，之后开机即用。
@@ -49,25 +51,25 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 ## 📥 下载安装
 
 1. 前往 [Releases](https://github.com/mengyuefeitian/AutoVolume/releases/latest) 下载最新的安装包。**请按芯片选择**：
-   - Apple 芯片（M1 及以上）→ `AutoVolume-x.y.z.dmg`
-   - Intel 芯片 → `AutoVolume-x.y.z-x86_64.dmg`
+   - Apple 芯片（M1 及以上）→ `NetDiskMount-x.y.z-arm64.dmg`
+   - Intel 芯片 → `NetDiskMount-x.y.z-x86_64.dmg`
 
    不确定自己的芯片：左上角苹果菜单 →「关于本机」，看「芯片」或「处理器」一行。
-2. 打开 DMG，把 **AutoVolume** 拖进「应用程序」文件夹。
-3. 从「应用程序」打开 AutoVolume，菜单栏会出现 AutoVolume 图标。
+2. 打开 DMG，把 **NetDiskMount** 拖进「应用程序」文件夹。
+3. 从「应用程序」打开 NetDiskMount，菜单栏会出现 NetDiskMount 图标。
 
-> **首次打开被 macOS 拦截？** AutoVolume 目前没有经过 Apple 公证。请打开「系统设置 → 隐私与安全性」，在页面下方点击「仍要打开」即可。
+> **首次打开被 macOS 拦截？** NetDiskMount 目前没有经过 Apple 公证。请打开「系统设置 → 隐私与安全性」，在页面下方点击「仍要打开」即可。
 
-> **从 0.1.52 及更早版本升级**：需要手动下载安装一次 0.1.53 或更新版本；之后的新版本会自动提示升级。
+> **从 AutoVolume 升级**：0.1.53 及更新版本会自动提示升级到 NetDiskMount 1.0，直接点「安装更新」即可；通过自动更新升级后，「应用程序」里的文件夹名称仍显示为 AutoVolume，应用本身、菜单栏和所有界面都已是 NetDiskMount，功能不受影响。想让文件名也变成 NetDiskMount，可以直接下载 DMG 全新安装（配置和密码同样保留）。更早的版本（0.1.52 及以前）需要先手动安装一次 0.1.53 或更新版本。
 
 **系统要求**：macOS 14 Sonoma 或更高版本，Apple 芯片（M1 及以上）**或 Intel 芯片**的 Mac。
 
-> **Intel 用户请注意**：Apple 已将 macOS 27 定为仅支持 Apple 芯片的版本，因此 Intel 版的最高系统为 macOS 26 Tahoe。AutoVolume 会持续提供 Intel 安装包，直到 macOS 28 正式发布为止。
+> **Intel 用户请注意**：Apple 已将 macOS 27 定为仅支持 Apple 芯片的版本，因此 Intel 版的最高系统为 macOS 26 Tahoe。NetDiskMount 会持续提供 Intel 安装包，直到 macOS 28 正式发布为止。
 
 ## 🚀 使用方法
 
 1. **添加网络文件夹**：左键点击菜单栏图标 → 点「添加」→ 选择类型（SMB / WebDAV / AFP / NFS），填写服务器地址、路径、账号和密码 →「测试连通性」→「保存并挂载」。
-2. **之后就不用管了**：AutoVolume 会按你设置的间隔检查，断开了就自动重新挂载；列表里可以随时手动挂载、卸载、编辑或删除。
+2. **之后就不用管了**：NetDiskMount 会按你设置的间隔检查，断开了就自动重新挂载；列表里可以随时手动挂载、卸载、编辑或删除。
 3. **NTFS 硬盘读写**：右键菜单栏图标 →「设置」→「NTFS」页，打开「自动以读写方式挂载 NTFS 外接硬盘」，之后插入硬盘即可读写。
 4. **右键菜单**：查看日志、导出诊断信息、设置、检查更新、退出。
 5. **设置**：
@@ -78,7 +80,7 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 ## ❓ 常见问题
 
 <details>
-<summary><b>菜单栏里看不到 AutoVolume 图标？</b></summary>
+<summary><b>菜单栏里看不到 NetDiskMount 图标？</b></summary>
 
 - 请确认使用的是 **0.1.53 或更新版本**：更早的版本在 macOS 14/15 上无法启动。
 - 如果菜单栏图标太多，带刘海的 MacBook 可能会把部分图标挡住，可以按住 ⌘ 拖动其他图标腾出位置，或使用 Ice、Bartender 等菜单栏管理工具。
@@ -97,7 +99,7 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 <details>
 <summary><b>开启 NTFS 读写为什么要输入电脑密码？</b></summary>
 
-读写 NTFS 硬盘需要安装一个小驱动（基于开源的 ntfs-3g 和 FUSE-T，不需要安装系统扩展、不用进恢复模式）。安装驱动需要管理员权限，只在第一次、以及 AutoVolume 升级后需要输入一次。
+读写 NTFS 硬盘需要安装一个小驱动（基于开源的 ntfs-3g 和 FUSE-T，不需要安装系统扩展、不用进恢复模式）。安装驱动需要管理员权限，只在第一次、以及 NetDiskMount 升级后需要输入一次。
 
 </details>
 
@@ -111,7 +113,7 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 <details>
 <summary><b>怎么卸载？</b></summary>
 
-右键菜单栏图标 →「退出」，把「应用程序」里的 AutoVolume 移到废纸篓。如需清除配置，删除 `~/Library/Application Support/AutoVolume` 文件夹。
+右键菜单栏图标 →「退出」，把「应用程序」里的 NetDiskMount 移到废纸篓。如需清除配置，删除 `~/Library/Application Support/AutoVolume` 文件夹。
 
 如果开启过 NTFS 读写，还可以在「终端」里执行以下命令移除 NTFS 组件（需要输入电脑密码）：
 
@@ -137,7 +139,7 @@ FUSE-T 是独立安装的组件，可按 [FUSE-T 官方说明](https://www.fuse-
 git clone https://github.com/mengyuefeitian/AutoVolume.git
 cd AutoVolume/AutoVolume
 ./script/build_and_run.sh --verify     # 编译、运行测试、签名
-./script/package_dmg.sh 0.1.53         # 打包 DMG（版本号需与 Info.plist 一致）
+./script/package_dmg.sh 1.0.0          # 打包 DMG（版本号需与 Info.plist 一致）
 ```
 
 构建说明、发布流程等详见 [`AutoVolume/CLAUDE.md`](AutoVolume/CLAUDE.md)。
@@ -173,4 +175,4 @@ docs/
 
 ## 📄 许可证
 
-AutoVolume 使用 [MIT License](LICENSE) 开源。内置的第三方组件遵循各自的许可证，许可证文本随应用一起分发。
+NetDiskMount 使用 [MIT License](LICENSE) 开源。内置的第三方组件遵循各自的许可证，许可证文本随应用一起分发。

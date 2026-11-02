@@ -11,11 +11,11 @@ set -euo pipefail
 #
 # Version numbers are read from the app bundle actually embedded inside the
 # DMG being published, not passed on the command line and not read from
-# dist/AutoVolume.app: AutoVolume's CFBundleVersion is a plain integer (e.g.
+# dist/NetDiskMount.app: the app's CFBundleVersion is a plain integer (e.g.
 # 50) while CFBundleShortVersionString is dotted (0.1.50). Sparkle compares
 # sparkle:version against CFBundleVersion, so the appcast entry must carry
 # the integer, not the dotted string. Reading from the DMG itself (rather
-# than a possibly-stale local dist/AutoVolume.app build) guarantees the
+# than a possibly-stale local dist/NetDiskMount.app build) guarantees the
 # appcast always describes what's actually inside the artifact being signed
 # and uploaded.
 
@@ -30,8 +30,8 @@ REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
 # arm64 feed: every install predating the split already points at it and must
 # keep upgrading without interruption.
 #
-# Since 0.1.60 both artifacts carry an explicit marker: AutoVolume-<v>-arm64.dmg
-# and AutoVolume-<v>-x86_64.dmg. The unmarked fallback below is kept on purpose:
+# Since 0.1.60 both artifacts carry an explicit marker: <name>-<v>-arm64.dmg
+# and <name>-<v>-x86_64.dmg (<name> is NetDiskMount from 1.0.0, AutoVolume before). The unmarked fallback below is kept on purpose:
 # every arm64 artifact published before then was named AutoVolume-<v>.dmg, and
 # re-publishing one of those must still land in the arm64 feed rather than
 # breaking the update path for everyone already on it.
@@ -116,7 +116,10 @@ fi
 # The artifact name is only a claim — verify it against the binary actually
 # inside the DMG. Publishing an arm64 build to the Intel feed would silently
 # break updates for every Intel user.
-APP_EXECUTABLE="$RESOLVED_APP_BUNDLE/Contents/MacOS/AutoVolume"
+# The executable name comes from the bundle itself (CFBundleExecutable) so this keeps working across the
+# AutoVolume -> NetDiskMount rename and for re-publishing builds of either name.
+APP_EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$RESOLVED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true)"
+APP_EXECUTABLE="$RESOLVED_APP_BUNDLE/Contents/MacOS/${APP_EXECUTABLE_NAME:-NetDiskMount}"
 if [ -f "$APP_EXECUTABLE" ]; then
   ACTUAL_ARCHS="$(lipo -archs "$APP_EXECUTABLE" 2>/dev/null || true)"
   if [ -n "$ACTUAL_ARCHS" ] && [[ " $ACTUAL_ARCHS " != *" $DETECTED_ARCH "* ]]; then

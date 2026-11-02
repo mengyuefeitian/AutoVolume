@@ -7,22 +7,22 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # to arm64 so a plain run behaves exactly as it always has.
 TARGET_ARCH="${TARGET_ARCH:-arm64}"
 export TARGET_ARCH
-APPB="$TMP/AutoVolume.app"; mkdir -p "$APPB/Contents/MacOS"
-for kv in "CFBundleShortVersionString string 0.1.50" "CFBundleVersion string 50" "LSMinimumSystemVersion string 14.0"; do
+APPB="$TMP/NetDiskMount.app"; mkdir -p "$APPB/Contents/MacOS"
+for kv in "CFBundleExecutable string NetDiskMount" "CFBundleShortVersionString string 0.1.50" "CFBundleVersion string 50" "LSMinimumSystemVersion string 14.0"; do
   /usr/libexec/PlistBuddy -c "Add :$kv" "$APPB/Contents/Info.plist" >/dev/null; done
 printf 'int main(void){return 0;}\n' > "$TMP/m.c"
-clang -arch "$TARGET_ARCH" -mmacosx-version-min=14.0 -o "$APPB/Contents/MacOS/AutoVolume" "$TMP/m.c"
+clang -arch "$TARGET_ARCH" -mmacosx-version-min=14.0 -o "$APPB/Contents/MacOS/NetDiskMount" "$TMP/m.c"
 printf '#!/bin/bash\necho '"'"'sparkle:edSignature="SIG==" length="123"'"'"'\n' > "$TMP/sign_update"; chmod +x "$TMP/sign_update"
 # Both artifacts carry an explicit architecture marker. publish_release.sh
 # derives the target architecture from the name and refuses to publish a
 # mismatched build.
-DMG_NAME="AutoVolume-0.1.50-$TARGET_ARCH.dmg"
+DMG_NAME="NetDiskMount-0.1.50-$TARGET_ARCH.dmg"
 touch "$TMP/key" "$TMP/$DMG_NAME"
 cat > "$TMP/appcast.xml" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>AutoVolume Updates</title>
+    <title>NetDiskMount Updates</title>
   </channel>
 </rss>
 XML
@@ -39,16 +39,18 @@ echo "PASS: publish_release"
 
 # Important 4 (final review): publish_release.sh must read versions from the app
 # bundle actually embedded in the DMG being published (not from a possibly-stale
-# dist/AutoVolume.app) whenever APP_BUNDLE is not explicitly overridden. Build a
+# dist/NetDiskMount.app) whenever APP_BUNDLE is not explicitly overridden. Build a
 # real, throwaway DMG containing its own Info.plist/version and verify the
-# attach -> read -> detach path.
+# attach -> read -> detach path. The bundle inside is deliberately a *legacy*
+# AutoVolume.app: re-publishing a build from before the rename must keep working,
+# and the executable has to be found through CFBundleExecutable, not a fixed name.
 TMP2="$(mktemp -d)"; trap 'rm -rf "$TMP" "$TMP2"' EXIT
 hdiutil create -size 20m -fs HFS+ -volname AutoVolumePublishTest -ov "$TMP2/rw-$TARGET_ARCH.dmg" >/dev/null
 ATTACH_OUT="$(hdiutil attach -nobrowse -noautoopen "$TMP2/rw-$TARGET_ARCH.dmg")"
 MP="$(printf '%s\n' "$ATTACH_OUT" | grep -Eo '/Volumes/.*$' | tail -n 1)"
 [[ -n "$MP" ]] || { echo "FAIL: could not attach throwaway rw dmg"; exit 1; }
 mkdir -p "$MP/AutoVolume.app/Contents/MacOS"
-for kv in "CFBundleShortVersionString string 0.1.77" "CFBundleVersion string 77" "LSMinimumSystemVersion string 14.0"; do
+for kv in "CFBundleExecutable string AutoVolume" "CFBundleShortVersionString string 0.1.77" "CFBundleVersion string 77" "LSMinimumSystemVersion string 14.0"; do
   /usr/libexec/PlistBuddy -c "Add :$kv" "$MP/AutoVolume.app/Contents/Info.plist" >/dev/null; done
 printf 'int main(void){return 0;}\n' > "$TMP2/m.c"
 clang -arch "$TARGET_ARCH" -mmacosx-version-min=14.0 -o "$MP/AutoVolume.app/Contents/MacOS/AutoVolume" "$TMP2/m.c"

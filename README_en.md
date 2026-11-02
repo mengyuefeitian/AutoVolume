@@ -1,12 +1,14 @@
 <div align="center">
 
-<img src="docs/assets/autovolume-icon.png" width="128" alt="AutoVolume icon">
+<img src="docs/assets/autovolume-icon.png" width="128" alt="NetDiskMount icon">
 
-# AutoVolume
+# NetDiskMount
 
-**A tiny menu bar app that keeps your NAS, cloud drives and external disks always available on your Mac**
+**A tiny menu bar app that keeps your NAS, network drives and external disks always mounted on your Mac**
 
-After a network drop, sleep, or a Wi‑Fi switch, AutoVolume reconnects your network folders automatically. External NTFS drives are read/write as soon as you plug them in.
+After a network drop, sleep, or a Wi‑Fi switch, NetDiskMount reconnects your network folders automatically. External NTFS drives are read/write as soon as you plug them in.
+
+> Starting with 1.0 the app is officially named **NetDiskMount** (formerly AutoVolume, a name that was often mistaken for a volume-control tool). Installed copies upgrade in place through the built-in updater and keep their settings and passwords.
 
 [![Download](https://img.shields.io/github/v/release/mengyuefeitian/AutoVolume?label=download&style=flat-square)](https://github.com/mengyuefeitian/AutoVolume/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
@@ -25,7 +27,7 @@ After a network drop, sleep, or a Wi‑Fi switch, AutoVolume reconnects your net
 
 Tired of your NAS folders disconnecting every morning? Re-typing WebDAV addresses and passwords? Plugging in a Windows drive and finding it read-only?
 
-AutoVolume lives in your menu bar and takes care of all that:
+NetDiskMount lives in your menu bar and takes care of all that:
 
 - 🔁 **Automatic reconnect**: when the network comes back or your Mac wakes up, network folders are mounted again, with no more "Connect to Server" in Finder.
 - 🗂 **Set up once**: save the server, account, password and mount location once, and it just works from then on.
@@ -48,20 +50,20 @@ SMB negotiates SMB2–SMB3 (insecure SMB1 is never used) with optional SMB3 mult
 
 ## 📥 Install
 
-1. Download the latest `AutoVolume-x.y.z.dmg` from [Releases](https://github.com/mengyuefeitian/AutoVolume/releases/latest).
-2. Open the DMG and drag **AutoVolume** into Applications.
-3. Launch AutoVolume from Applications. Its icon appears in the menu bar.
+1. Download the latest installer from [Releases](https://github.com/mengyuefeitian/AutoVolume/releases/latest): `NetDiskMount-x.y.z-arm64.dmg` for Apple silicon, `NetDiskMount-x.y.z-x86_64.dmg` for Intel.
+2. Open the DMG and drag **NetDiskMount** into Applications.
+3. Launch NetDiskMount from Applications. Its icon appears in the menu bar.
 
-> **macOS blocks the first launch?** AutoVolume is not notarized yet. Open System Settings → Privacy & Security and click "Open Anyway" near the bottom.
+> **macOS blocks the first launch?** NetDiskMount is not notarized yet. Open System Settings → Privacy & Security and click "Open Anyway" near the bottom.
 
-> **Upgrading from 0.1.52 or earlier**: install 0.1.53 or later manually once; after that, new versions are offered automatically.
+> **Upgrading from AutoVolume**: 0.1.53 and later are offered NetDiskMount 1.0 automatically; just click Install Update. After an in-app upgrade the folder in Applications is still called AutoVolume, but the app, menu bar and every window are NetDiskMount and nothing else is affected. For the file name to change too, install fresh from the DMG (settings and passwords are kept). 0.1.52 and earlier need one manual install of 0.1.53 or later first.
 
-**Requirements**: macOS 14 Sonoma or later on Apple silicon (M1 or newer).
+**Requirements**: macOS 14 Sonoma or later, on Apple silicon (M1 or newer) or Intel (Intel builds stop at macOS 26 Tahoe).
 
 ## 🚀 How to use
 
 1. **Add a network folder**: click the menu bar icon → "Add" → choose SMB / WebDAV / AFP / NFS, fill in server, path, account and password → "Test Reachability" → "Save & Mount".
-2. **That's it**: AutoVolume checks at the interval you set and remounts anything that dropped. From the list you can mount, unmount, edit or remove at any time.
+2. **That's it**: NetDiskMount checks at the interval you set and remounts anything that dropped. From the list you can mount, unmount, edit or remove at any time.
 3. **NTFS read/write**: right-click the menu bar icon → Settings → NTFS, turn on "Automatically mount external NTFS drives read-write", then plug in your drive.
 4. **Right-click menu**: View Logs, Export Diagnostics…, Settings, Check for Updates…, Quit.
 5. **Settings**:
@@ -72,7 +74,7 @@ SMB negotiates SMB2–SMB3 (insecure SMB1 is never used) with optional SMB3 mult
 ## ❓ FAQ
 
 <details>
-<summary><b>I can't see the AutoVolume icon in the menu bar</b></summary>
+<summary><b>I can't see the NetDiskMount icon in the menu bar</b></summary>
 
 - Make sure you're on **0.1.53 or later**. Earlier versions don't start on macOS 14/15.
 - On MacBooks with a notch, a crowded menu bar can hide icons. ⌘-drag other icons away, or use a menu bar manager such as Ice or Bartender.
@@ -91,7 +93,7 @@ SMB negotiates SMB2–SMB3 (insecure SMB1 is never used) with optional SMB3 mult
 <details>
 <summary><b>Why does NTFS read/write ask for my Mac password?</b></summary>
 
-Writing to NTFS needs a small driver (based on open-source ntfs-3g and FUSE-T, with no kernel extension and no Recovery Mode). Installing it needs administrator permission, so you're asked once at first use and once after each AutoVolume update.
+Writing to NTFS needs a small driver (based on open-source ntfs-3g and FUSE-T, with no kernel extension and no Recovery Mode). Installing it needs administrator permission, so you're asked once at first use and once after each NetDiskMount update.
 
 </details>
 
@@ -105,7 +107,7 @@ Right-click the menu bar icon → "Export Diagnostics…". A zip appears on your
 <details>
 <summary><b>How do I uninstall?</b></summary>
 
-Right-click the menu bar icon → Quit, then move AutoVolume from Applications to the Trash. To remove your settings, delete `~/Library/Application Support/AutoVolume`.
+Right-click the menu bar icon → Quit, then move NetDiskMount from Applications to the Trash. To remove your settings, delete `~/Library/Application Support/AutoVolume`.
 
 If you enabled NTFS read/write, remove the NTFS components in Terminal (asks for your password):
 
@@ -131,7 +133,7 @@ FUSE-T is installed separately; see the [FUSE-T website](https://www.fuse-t.org)
 git clone https://github.com/mengyuefeitian/AutoVolume.git
 cd AutoVolume/AutoVolume
 ./script/build_and_run.sh --verify     # build, run tests, sign
-./script/package_dmg.sh 0.1.53         # package a DMG (must match Info.plist version)
+./script/package_dmg.sh 1.0.0          # package a DMG (must match Info.plist version)
 ```
 
 See [`AutoVolume/CLAUDE.md`](AutoVolume/CLAUDE.md) for build-environment notes and the release workflow.
@@ -148,4 +150,4 @@ See [Releases](https://github.com/mengyuefeitian/AutoVolume/releases) for what c
 
 ## 📄 License
 
-AutoVolume is released under the [MIT License](LICENSE). Bundled third-party components are covered by their own licenses, which ship with the app.
+NetDiskMount is released under the [MIT License](LICENSE). Bundled third-party components are covered by their own licenses, which ship with the app.

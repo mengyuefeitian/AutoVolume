@@ -1,10 +1,10 @@
 #!/bin/bash
-# Builds AutoVolume for a single architecture. Set TARGET_ARCH=x86_64 for the
+# Builds NetDiskMount for a single architecture. Set TARGET_ARCH=x86_64 for the
 # Intel release; it defaults to arm64 so existing invocations are unchanged.
 #
 # Intermediate objects are kept per-arch (.manual-build-$TARGET_ARCH) so an arm64
 # and an x86_64 build can both exist on disk at once. The final bundle always
-# lands at dist/AutoVolume.app — package it (script/package_dmg.sh) before
+# lands at dist/NetDiskMount.app — package it (script/package_dmg.sh) before
 # building the other architecture, or use script/release_all.sh which does the
 # full build→package sweep for both.
 set -euo pipefail
@@ -16,9 +16,9 @@ case "$TARGET_ARCH" in
   *) echo "error: TARGET_ARCH must be arm64 or x86_64 (got '$TARGET_ARCH')" >&2; exit 1 ;;
 esac
 export TARGET_ARCH
-echo "Building AutoVolume for $TARGET_ARCH"
+echo "Building NetDiskMount for $TARGET_ARCH"
 BUILD="$ROOT/.manual-build-$TARGET_ARCH"
-APP="$ROOT/dist/AutoVolume.app"
+APP="$ROOT/dist/NetDiskMount.app"
 
 # Ad-hoc signing (--sign -) gives every rebuild a fresh cdhash, which silently
 # invalidates any TCC grant (e.g. Full Disk Access for NTFSPrivilegedHelper)
@@ -81,7 +81,7 @@ for shell_test in "$ROOT"/script/tests/test_*.sh; do
   bash "$shell_test"
 done
 
-pkill -f "$APP/Contents/MacOS/AutoVolume" 2>/dev/null || true
+pkill -f "$APP/Contents/MacOS/NetDiskMount" 2>/dev/null || true
 
 mkdir -p "$BUILD/shared" "$BUILD/tests" "$ROOT/dist"
 
@@ -126,7 +126,9 @@ swiftc \
   Sources/AutoVolumeShared/FullDiskAccessChecker.swift \
   Sources/AutoVolumeShared/NTFSRemountDebouncer.swift \
   Sources/AutoVolumeShared/NTFSAutoMountService.swift \
-  Sources/AutoVolumeShared/UpdateSchedule.swift
+  Sources/AutoVolumeShared/UpdateSchedule.swift \
+  Sources/AutoVolumeShared/NetworkPathFilter.swift \
+  Sources/AutoVolumeShared/StatusTransitionTracker.swift
 
 swiftc \
   -target "$TARGET_ARCH-apple-macosx14.0" \
@@ -151,7 +153,7 @@ swiftc \
   -framework AppKit \
   -Xlinker -rpath \
   -Xlinker @executable_path/../Frameworks \
-  -o "$BUILD/AutoVolumeAgent" \
+  -o "$BUILD/NetDiskMountAgent" \
   Sources/AutoVolumeAgent/NetworkPathWatcher.swift \
   Sources/AutoVolumeAgent/ServerReachabilityWatcher.swift \
   Sources/AutoVolumeAgent/MountedVolumeWatcher.swift \
@@ -194,8 +196,8 @@ swiftc \
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
-cp "$BUILD/AutoVolumeApp" "$APP/Contents/MacOS/AutoVolume"
-cp "$BUILD/AutoVolumeAgent" "$APP/Contents/Resources/AutoVolumeAgent"
+cp "$BUILD/AutoVolumeApp" "$APP/Contents/MacOS/NetDiskMount"
+cp "$BUILD/NetDiskMountAgent" "$APP/Contents/Resources/NetDiskMountAgent"
 cp "$BUILD/shared/libAutoVolumeShared.dylib" "$APP/Contents/Frameworks/libAutoVolumeShared.dylib"
 cp "$ROOT/Resources/com.autovolume.agent.plist" "$APP/Contents/Resources/com.autovolume.agent.plist"
 cp "$ROOT/Resources/AutoVolume.icns" "$APP/Contents/Resources/AutoVolume.icns"
@@ -219,7 +221,7 @@ cp "$ROOT/Resources/com.autovolume.ntfshelper.plist" "$APP/Contents/Resources/co
 cp "$ROOT/Resources/com.autovolume.ntfshelper.newsyslog.conf" "$APP/Contents/Resources/com.autovolume.ntfshelper.newsyslog.conf"
 
 codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/libAutoVolumeShared.dylib"
-codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/AutoVolumeAgent"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/NetDiskMountAgent"
 codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/NTFSDriver/ntfs-3g"
 codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/NTFSPrivilegedHelper"
 

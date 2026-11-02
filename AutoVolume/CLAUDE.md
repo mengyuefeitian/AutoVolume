@@ -1,4 +1,20 @@
-# AutoVolume Project Rules
+# NetDiskMount (formerly AutoVolume) Project Rules
+
+## Product name vs. internal identifiers — read before renaming anything
+
+The product is called **NetDiskMount** (from 1.0.0; it was AutoVolume, which users mistook for a volume-control tool). The *user-visible* name is NetDiskMount everywhere: `CFBundleName`/`CFBundleDisplayName`/`CFBundleExecutable`, `NetDiskMount.app`, `NetDiskMountAgent`, every L10n string, DMG/volume names, diagnostics zip, docs.
+
+These identifiers **deliberately still say AutoVolume** and must not be renamed — each one is load-bearing for people who already have the app installed:
+
+- **Bundle ID `com.autovolume.app`, LaunchAgent label `com.autovolume.agent`, helper labels `com.autovolume.ntfs*`.** Sparkle only accepts an update whose bundle ID matches the installed app (its installer falls back to matching by bundle ID when the filename differs, which is what lets `AutoVolume.app` upgrade into `NetDiskMount.app`), and TCC / launchd grants are keyed to them.
+- **`~/Library/Application Support/AutoVolume`, `~/.config/autovolume/*`, `AutoVolume.log`, the `# BEGIN AutoVolume managed SMB options` markers.** Renaming orphans every user's saved volumes, encrypted passwords and logs.
+- **`SUFeedURL` (`mengyuefeitian.github.io/AutoVolume/appcast*.xml`) and the GitHub repo name.** GitHub Pages does not redirect, so renaming the repo would cut every installed copy off from updates.
+- **The code-signing identity `AutoVolume Local Signing`** (changing it changes the designated requirement and drops TCC grants), **Swift module/type names** (`AutoVolumeShared`, `AutoVolumeLogger`…), `Resources/AutoVolume.icns`.
+- **Sparkle installs an update at the old bundle path** (`SPARKLE_NORMALIZE_INSTALLED_APPLICATION_NAME = 0`), so a copy upgraded in-app keeps living in `AutoVolume.app` while running the NetDiskMount build. Process-matching code must therefore accept both names (see `terminateResidualAgents`).
+
+## Version numbering from 1.0.0
+
+`CFBundleShortVersionString` is `1.0.0` and `CFBundleVersion` continues the old integer sequence (**67**, then 68, …). Sparkle compares `CFBundleVersion`, so it must only ever increase — do **not** reset it to match the dotted version.
 
 ## 铁律 / HARD RULE — 永远不要使用 macOS 钥匙串（Keychain）
 
@@ -52,15 +68,15 @@ SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk MACOSX_DEPLOYMEN
 ## Release workflow after code changes
 
 > **铁律 / HARD RULE — 每次修改完成必须提升版本号，绝不覆盖已有版本。**
-> Every build handed to the user after ANY code change MUST have a new, never-used version (patch +1 in `CFBundleShortVersionString`, `CFBundleVersion` +1). **Never** rebuild or repackage under a version number that already has a DMG in `dist/` or was ever handed to the user — not for "small fixes", not for review-fix waves, not for "the same release, just corrected". Each distinct build = distinct version, so the user can tell which build a bug came from. `script/package_dmg.sh` refuses to overwrite an existing DMG; never delete an old DMG to get around that. This rule also overrides any plan text that says "bump once at the end": plans batch work, but every DMG given to the user gets its own version.
+> Every build handed to the user after ANY code change MUST have a new, never-used version (patch +1 in `CFBundleShortVersionString`, `CFBundleVersion` +1; `1.0.0` carries build 67). **Never** rebuild or repackage under a version number that already has a DMG in `dist/` or was ever handed to the user — not for "small fixes", not for review-fix waves, not for "the same release, just corrected". Each distinct build = distinct version, so the user can tell which build a bug came from. `script/package_dmg.sh` refuses to overwrite an existing DMG; never delete an old DMG to get around that. This rule also overrides any plan text that says "bump once at the end": plans batch work, but every DMG given to the user gets its own version.
 
 After finishing any code change in this project (including small/intermediate iterations, not just final "done" states), automatically:
 
 1. **Bump the version** in `Resources/Info.plist`:
-   - `CFBundleShortVersionString`: increment the patch number (e.g. `0.1.45` → `0.1.46`)
-   - `CFBundleVersion`: match the new patch number as a plain integer (e.g. `46`)
-2. **Build and package both architectures**: run `script/release_all.sh <version>` (e.g. `script/release_all.sh 0.1.46`), matching the version bumped in step 1. It pins `SDKROOT`/`MACOSX_DEPLOYMENT_TARGET` internally, then builds arm64 and x86_64 in turn, **packaging each immediately** — both architectures write to the same `dist/AutoVolume.app`, so build and package must stay paired or one arch's bundle will be sealed into the other arch's DMG. Produces `dist/AutoVolume-<v>-arm64.dmg` and `dist/AutoVolume-<v>-x86_64.dmg` (Intel). All manual tests must pass for each architecture.
-4. **Hand back to the user for self-testing**: tell the user the new DMG paths (`dist/AutoVolume-<version>-arm64.dmg` and `dist/AutoVolume-<version>-x86_64.dmg`) and ask them to test them themselves before it's considered done. Do not mark the task complete on your own say-so — this step exists because compile/tests passing does not prove the feature behaves correctly in the running app.
+   - `CFBundleShortVersionString`: increment the patch number (e.g. `1.0.0` → `1.0.1`)
+   - `CFBundleVersion`: increment the integer by one (e.g. `67` → `68`); it is no longer equal to the patch number
+2. **Build and package both architectures**: run `script/release_all.sh <version>` (e.g. `script/release_all.sh 1.0.1`), matching the version bumped in step 1. It pins `SDKROOT`/`MACOSX_DEPLOYMENT_TARGET` internally, then builds arm64 and x86_64 in turn, **packaging each immediately** — both architectures write to the same `dist/NetDiskMount.app`, so build and package must stay paired or one arch's bundle will be sealed into the other arch's DMG. Produces `dist/NetDiskMount-<v>-arm64.dmg` and `dist/NetDiskMount-<v>-x86_64.dmg` (Intel). All manual tests must pass for each architecture.
+4. **Hand back to the user for self-testing**: tell the user the new DMG paths (`dist/NetDiskMount-<version>-arm64.dmg` and `dist/NetDiskMount-<version>-x86_64.dmg`) and ask them to test them themselves before it's considered done. Do not mark the task complete on your own say-so — this step exists because compile/tests passing does not prove the feature behaves correctly in the running app.
 
 This applies automatically without the user needing to ask each time — it mirrors the workflow this project used with Codex previously. Skip this only if the user explicitly says not to (e.g. "don't package this, just show me the diff").
 
@@ -68,9 +84,9 @@ This applies automatically without the user needing to ask each time — it mirr
 
 ## Dual-architecture releases (arm64 + x86_64)
 
-Every release ships **two installers** — `AutoVolume-<v>-arm64.dmg` (arm64) and `AutoVolume-<v>-x86_64.dmg` (Intel) — cut from the same source at the same version. This continues until macOS 28 ships, after which Intel support is dropped.
+Every release ships **two installers** — `NetDiskMount-<v>-arm64.dmg` (arm64) and `NetDiskMount-<v>-x86_64.dmg` (Intel) — cut from the same source at the same version. This continues until macOS 28 ships, after which Intel support is dropped.
 
-**Both architectures carry an explicit marker** (from 0.1.60 on). arm64 used to ship unmarked as `AutoVolume-<v>.dmg`; those already-published artifacts and their appcast entries are left untouched — renaming a released asset would break download URLs for everyone on it. `publish_release.sh` keeps an unmarked → arm64 fallback so re-publishing an old build still lands in the right feed.
+**Both architectures carry an explicit marker** (from 0.1.60 on). arm64 used to ship unmarked as `AutoVolume-<v>.dmg` (and everything before 1.0.0 is named `AutoVolume-*`); those already-published artifacts and their appcast entries are left untouched — renaming a released asset would break download URLs for everyone on it. `publish_release.sh` keeps an unmarked → arm64 fallback so re-publishing an old build still lands in the right feed.
 
 - **`TARGET_ARCH`** (`arm64` | `x86_64`, default `arm64`) drives every script: `build_and_run.sh`, `build_ntfs3g.sh`, `check_binary_compat.sh`, `package_dmg.sh`. `build_and_run.sh` exports it, so the shell test suites inherit the architecture being built — their fixtures compile for `TARGET_ARCH` too.
 - **Two Sparkle feeds.** Sparkle cannot filter enclosures by architecture, so each arch has its own feed and the matching `SUFeedURL` is baked into that arch's Info.plist at build time:
@@ -78,4 +94,4 @@ Every release ships **two installers** — `AutoVolume-<v>-arm64.dmg` (arm64) an
   - `docs/appcast-x86_64.xml` → x86_64
 - **Publishing**: `script/publish_release.sh` derives the architecture from the DMG filename and writes to the matching feed. Verify both artifacts landed in the right feed — swapping them silently breaks updates for one architecture.
 - **NTFS driver**: `ntfs-3g`/`libntfs-3g` are architecture-specific and must be built per-arch. arm64 keeps the flat `Resources/NTFSDriver/` layout; other architectures live in `Resources/NTFSDriver/<arch>/`. Rebuild with `TARGET_ARCH=x86_64 script/build_ntfs3g.sh` (needs the GNU build system; the script finds Homebrew's autotools itself). FUSE-T is already universal, so no cross-toolchain work is needed there.
-- **Only the ntfs-3g binaries are arch-specific.** Swift sources, Sparkle, FUSE-T, the mount commands and the LaunchDaemon plists are all architecture-neutral — no `#if arch(...)` branches exist anywhere. Bumping the version and building a local DMG are local, reversible actions; committing to git still follows the global git-safety rules (only commit when explicitly asked). When the user does ask to commit a release, follow the existing convention: a single `release: prepare AutoVolume X.Y.Z` commit (see `git log` for examples) that includes the version bump alongside the code changes.
+- **Only the ntfs-3g binaries are arch-specific.** Swift sources, Sparkle, FUSE-T, the mount commands and the LaunchDaemon plists are all architecture-neutral — no `#if arch(...)` branches exist anywhere. Bumping the version and building a local DMG are local, reversible actions; committing to git still follows the global git-safety rules (only commit when explicitly asked). When the user does ask to commit a release, follow the existing convention: a single `release: prepare NetDiskMount X.Y.Z` commit (see `git log` for examples) that includes the version bump alongside the code changes.

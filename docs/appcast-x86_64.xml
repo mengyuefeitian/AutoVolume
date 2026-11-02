@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>AutoVolume Updates (Intel x86_64)</title>
+    <title>NetDiskMount Updates (Intel x86_64)</title>
     <item>
       <title>Version 0.1.66</title>
       <pubDate>Mon, 28 Sep 2026 16:46:59 +0800</pubDate>

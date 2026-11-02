@@ -1,12 +1,12 @@
 #!/bin/bash
-# Builds and packages AutoVolume for both shipping architectures.
+# Builds and packages NetDiskMount for both shipping architectures.
 #
 # Every release ships two installers:
-#   AutoVolume-<v>-arm64.dmg    (arm64)
-#   AutoVolume-<v>-x86_64.dmg   (Intel)
+#   NetDiskMount-<v>-arm64.dmg    (arm64)
+#   NetDiskMount-<v>-x86_64.dmg   (Intel)
 # Both are cut from the same source tree at the same version — only TARGET_ARCH
 # differs. Order matters: each architecture is built and then packaged
-# immediately, because both builds write to the same dist/AutoVolume.app.
+# immediately, because both builds write to the same dist/NetDiskMount.app.
 # Packaging before moving on is what keeps the two artifacts from ever being
 # confused.
 #
@@ -15,8 +15,8 @@
 #
 # To publish afterwards, sign and insert each artifact separately — they land in
 # different appcasts:
-#   script/publish_release.sh dist/AutoVolume-<v>-arm64.dmg
-#   script/publish_release.sh dist/AutoVolume-<v>-x86_64.dmg
+#   script/publish_release.sh dist/NetDiskMount-<v>-arm64.dmg
+#   script/publish_release.sh dist/NetDiskMount-<v>-x86_64.dmg
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,7 +47,7 @@ for ARCH in arm64 x86_64; do
   # Belt-and-braces: confirm the bundle on disk really is this architecture
   # before it gets sealed into a DMG. build_and_run.sh already runs
   # check_binary_compat.sh, but this is the last point where a mix-up is cheap.
-  MAIN_BINARY="$ROOT/dist/AutoVolume.app/Contents/MacOS/AutoVolume"
+  MAIN_BINARY="$ROOT/dist/NetDiskMount.app/Contents/MacOS/NetDiskMount"
   ACTUAL="$(lipo -archs "$MAIN_BINARY" 2>/dev/null || true)"
   if [[ " $ACTUAL " != *" $ARCH "* ]]; then
     echo "error: built binary is '$ACTUAL', expected $ARCH — aborting before packaging" >&2
@@ -58,7 +58,7 @@ for ARCH in arm64 x86_64; do
   TARGET_ARCH="$ARCH" "$ROOT/script/package_dmg.sh" "$VERSION"
   # The marker is taken from the architecture itself, so the two artifacts can
   # never be named alike and neither can be mistaken for the other.
-  PRODUCED+=("$ROOT/dist/AutoVolume-$VERSION-$ARCH.dmg")
+  PRODUCED+=("$ROOT/dist/NetDiskMount-$VERSION-$ARCH.dmg")
 done
 
 echo ""

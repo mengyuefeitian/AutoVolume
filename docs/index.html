@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AutoVolume 智卷 - macOS 网络卷自动重连工具</title>
-  <meta name="description" content="AutoVolume 智卷是一款 macOS 菜单栏工具，用于自动检查并恢复 SMB、WebDAV、AFP、NFS 网络卷挂载。">
+  <title>NetDiskMount - macOS 网络磁盘自动挂载与断线重连工具</title>
+  <meta name="description" content="NetDiskMount 是一款 macOS 菜单栏工具，用于自动挂载并在断线后自动恢复 SMB、WebDAV、AFP、NFS 网络磁盘（NAS、网盘），并支持 NTFS 移动硬盘读写。">
   <style>
     :root {
       color-scheme: light;
@@ -499,7 +499,7 @@
   <nav>
     <div class="brand">
       <img src="assets/autovolume-icon.png" alt="">
-      <span>AutoVolume 智卷</span>
+      <span>NetDiskMount</span>
     </div>
     <a href="https://github.com/mengyuefeitian/AutoVolume/releases">GitHub</a>
   </nav>
@@ -508,7 +508,7 @@
     <div class="wrap hero">
       <div>
         <p class="eyebrow">Minimal macOS network volume utility</p>
-        <h1>AutoVolume 智卷</h1>
+        <h1>NetDiskMount</h1>
         <p class="lead">自动检查 SMB、WebDAV、AFP、NFS 网络卷挂载状态。网络恢复后自动重连，并把 Finder 带回你真正想进入的目录。</p>
         <div class="badges" aria-label="核心能力">
           <span class="badge">SMB2-SMB3</span>
@@ -521,10 +521,10 @@
           <a class="button secondary" href="#features">了解功能</a>
         </div>
       </div>
-      <div class="device" aria-label="AutoVolume interface preview">
+      <div class="device" aria-label="NetDiskMount interface preview">
         <div class="statusbar">
           <img src="assets/autovolume-icon.png" alt="">
-          <span>AutoVolume</span>
+          <span>NetDiskMount</span>
         </div>
         <div class="volume">
           <div class="dot"></div>
@@ -554,7 +554,7 @@
     <section id="features">
       <div class="wrap">
         <h2>为网络卷保活</h2>
-        <p class="section-lead">AutoVolume 专注做一件事：让 macOS 的网络文件服务器挂载更稳定、更少打扰、更容易恢复。</p>
+        <p class="section-lead">NetDiskMount 专注做一件事：让 macOS 的网络文件服务器挂载更稳定、更少打扰、更容易恢复。</p>
         <div class="grid">
           <article class="card"><h3>多协议支持</h3><p>支持 SMB、WebDAV、AFP、NFS，可为每个卷独立配置服务器、路径、账号和挂载点。</p></article>
           <article class="card"><h3>断网恢复</h3><p>网络恢复后自动重新连接，处理占用的旧挂载点，减少 Finder 中假在线的问题。</p></article>
@@ -570,7 +570,7 @@
       <div class="wrap split">
         <div>
           <h2>适合长期挂载 NAS 和私有云</h2>
-          <p class="section-lead">AutoVolume 更像一个安静的菜单栏守护工具，不抢屏幕、不频繁弹系统窗口，只在需要时把网络卷恢复到可用状态。</p>
+          <p class="section-lead">NetDiskMount 更像一个安静的菜单栏守护工具，不抢屏幕、不频繁弹系统窗口，只在需要时把网络卷恢复到可用状态。</p>
         </div>
         <ul class="list">
           <li><strong>WebDAV 体验优化</strong><br>兼容 HTTPS WebDAV，挂载后会清理重复 Finder 窗口，并进入系统真实挂载目录。</li>
@@ -584,10 +584,10 @@
       <div class="wrap">
         <h2>安装和使用</h2>
         <div class="steps">
-          <div class="step">打开 DMG，将 AutoVolume 拖入 Applications。</div>
+          <div class="step">打开 DMG，将 NetDiskMount 拖入 Applications。</div>
           <div class="step">从 Applications 启动，允许 macOS 网络卷宗权限。</div>
           <div class="step">添加服务器地址、远程路径、账号和检查间隔。</div>
-          <div class="step">挂载成功后，AutoVolume 会保持检测并在需要时重连。</div>
+          <div class="step">挂载成功后，NetDiskMount 会保持检测并在需要时重连。</div>
         </div>
       </div>
     </section>
@@ -597,7 +597,7 @@
         <h2>下载</h2>
         <p class="section-lead">最新正式版本为 0.1.47。请在 GitHub Releases 下载 DMG，并拖入 Applications 安装。</p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/mengyuefeitian/AutoVolume/releases/tag/v0.1.47">下载 0.1.47</a>
+          <a class="button primary" href="https://github.com/mengyuefeitian/AutoVolume/releases/latest">下载最新版</a>
           <a class="button secondary" href="#features">查看功能</a>
         </div>
       </div>
@@ -605,7 +605,7 @@
   </main>
 
   <footer>
-    <div class="wrap">AutoVolume 智卷 · Built for macOS 14+</div>
+    <div class="wrap">NetDiskMount · Built for macOS 14+</div>
   </footer>
 </body>
 </html>

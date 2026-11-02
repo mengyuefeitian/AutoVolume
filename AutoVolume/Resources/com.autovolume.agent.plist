@@ -6,7 +6,7 @@
     <string>com.autovolume.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/AutoVolume.app/Contents/Resources/AutoVolumeAgent</string>
+        <string>/Applications/NetDiskMount.app/Contents/Resources/NetDiskMountAgent</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

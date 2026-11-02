@@ -18,7 +18,7 @@ Verify a build actually got the stable identity (not a silent ad-hoc
 fallback):
 
 ```bash
-codesign -d -r- dist/AutoVolume.app/Contents/Resources/NTFSPrivilegedHelper
+codesign -d -r- dist/NetDiskMount.app/Contents/Resources/NTFSPrivilegedHelper
 # want:  designated => identifier "NTFSPrivilegedHelper" and certificate leaf = H"..."
 # NOT:   designated => identifier "NTFSPrivilegedHelper" and cdhash H"..."
 ```

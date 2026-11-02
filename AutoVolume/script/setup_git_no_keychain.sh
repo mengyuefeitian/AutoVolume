@@ -27,7 +27,9 @@ if [[ ! -f "$HELPER" ]]; then
   exit 1
 fi
 
-git -C "$REPO_ROOT" config --local credential.helper ''
+# --replace-all so re-running is safe: a repo that already has both values (for example after the
+# checkout moved to a new path and the old helper path went stale) is rewritten, not rejected.
+git -C "$REPO_ROOT" config --local --replace-all credential.helper ''
 git -C "$REPO_ROOT" config --local --add credential.helper "!bash $HELPER"
 
 echo "Configured $REPO_ROOT to resolve GitHub credentials from a file, not Keychain."

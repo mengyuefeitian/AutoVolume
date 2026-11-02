@@ -157,61 +157,77 @@ public final class AutoVolumeLogger: @unchecked Sendable {
         return try operation()
     }
 
+    /// Enforces the retention window and the size cap. Cost does not scale with the log's size: the
+    /// file is newest-first, so timestamps only decrease down the file and the first expired line can
+    /// be found by binary search (~17 timestamp parses for 88k lines). The previous version parsed
+    /// every line of the whole file — ~0.3s per 6000 lines, ~4-5s for the 88k-line log an unthrottled
+    /// agent produced in a week — and, because the first write after a quiet spell ran it, that
+    /// landed on the main thread as a multi-second UI freeze (issue #3).
     private func pruneLocked(now: Date) throws {
         guard FileManager.default.fileExists(atPath: logFileURL.path) else { return }
-        let data = try Data(contentsOf: logFileURL)
-        guard !data.isEmpty else { return }
+        let bytes = [UInt8](try Data(contentsOf: logFileURL))
+        guard !bytes.isEmpty else { return }
 
-        var lines = (String(data: data, encoding: .utf8) ?? "")
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-        if lines.last == "" {
-            lines.removeLast()
-        }
-
-        // `write()` always prepends new lines, so the file is already newest-first — no need
-        // to re-sort it here. Re-sorting used to re-parse every line's ISO8601 timestamp
-        // O(n log n) times (twice per comparison, with no memoization), which was the actual
-        // cost behind AutoVolume.log writes getting slower the longer the app ran uninterrupted.
+        // 1. Retention.
         let cutoff = now.addingTimeInterval(-retentionInterval)
-        lines = lines.filter { line in
-            guard let date = datePrefix(from: line) else { return true }
-            return date >= cutoff
+        let keptEnd = firstExpiredLineOffset(in: bytes, cutoff: cutoff)
+        var kept = Array(bytes[0..<keptEnd])
+
+        // 2. Size cap.
+        if kept.count > maxBytes {
+            // Trim to 90% of the cap, not the cap itself: trimming to exactly `maxBytes` would put the
+            // file right back over the limit after the very next line is appended, forcing this prune
+            // to run on every single write once the log reaches its cap. Headroom means dozens of
+            // writes happen before the next one.
+            kept = newestPrefix(of: kept, maxBytes: maxBytes * 9 / 10)
         }
 
-        var prunedData = Data(lines.joined(separator: "\n").utf8)
-        if !lines.isEmpty {
-            prunedData.append(0x0A)
-        }
-        if prunedData.count > maxBytes {
-            // Trim to 90% of the cap, not the cap itself: trimming to exactly `maxBytes` would
-            // put the file right back over the limit after the very next line is appended,
-            // forcing this same expensive parse-every-line prune to run on every single write
-            // once the log reaches its size cap — reintroducing the bug this method exists to
-            // avoid. Leaving headroom means dozens of writes happen before the next full prune.
-            prunedData = newestPrefix(from: lines, maxBytes: maxBytes * 9 / 10)
-        }
-        try prunedData.write(to: logFileURL, options: .atomic)
+        // Nothing expired and under the cap: leave the file alone rather than rewriting megabytes.
+        guard kept.count != bytes.count else { return }
+        try Data(kept).write(to: logFileURL, options: .atomic)
     }
 
-    private func datePrefix(from line: String) -> Date? {
-        guard let end = line.firstIndex(of: " ") else { return nil }
-        return calendar.date(from: String(line[..<end]))
-    }
+    private static let newline: UInt8 = 0x0A
 
-    private func newestPrefix(from lines: [String], maxBytes: Int) -> Data {
-        var selected: [String] = []
-        var totalBytes = 0
-        for line in lines {
-            let lineBytes = Data((line + "\n").utf8).count
-            if lineBytes > maxBytes {
-                selected = [String(line.prefix(maxBytes / 2))]
-                break
+    /// Offset of the first line dated before `cutoff`, or `bytes.count` if none is. Lines whose
+    /// timestamp cannot be parsed count as "not expired", so they are never discarded.
+    ///
+    /// Sound because every line `write()` produces starts with its own timestamp (it flattens `\r`/`\n`
+    /// in messages, so a message can never create a continuation line) and the file is newest-first.
+    private func firstExpiredLineOffset(in bytes: [UInt8], cutoff: Date) -> Int {
+        var low = 0               // everything before `low` is known to be in-window
+        var high = bytes.count    // everything from `high` on is known to be expired (or EOF)
+        while low < high {
+            let mid = low + (high - low) / 2
+            var lineStart = mid
+            while lineStart > low, bytes[lineStart - 1] != Self.newline { lineStart -= 1 }
+            var lineEnd = lineStart
+            while lineEnd < bytes.count, bytes[lineEnd] != Self.newline { lineEnd += 1 }
+            if let date = datePrefix(from: bytes[lineStart..<lineEnd]), date < cutoff {
+                high = lineStart
+            } else {
+                low = min(lineEnd + 1, bytes.count)
             }
-            guard totalBytes + lineBytes <= maxBytes else { break }
-            selected.append(line)
-            totalBytes += lineBytes
         }
-        return Data(selected.joined(separator: "\n").appending(selected.isEmpty ? "" : "\n").utf8)
+        return low
+    }
+
+    private func datePrefix(from line: ArraySlice<UInt8>) -> Date? {
+        guard let end = line.firstIndex(of: 0x20) else { return nil }
+        return calendar.date(from: String(decoding: line[line.startIndex..<end], as: UTF8.self))
+    }
+
+    /// The newest whole lines that fit in `maxBytes`. If even the newest line alone is too long, it is
+    /// truncated to half the budget (on a UTF-8 character boundary) so the log never ends up empty
+    /// just because one message was huge.
+    private func newestPrefix(of bytes: [UInt8], maxBytes: Int) -> [UInt8] {
+        guard bytes.count > maxBytes else { return bytes }
+        var boundary = maxBytes
+        while boundary > 0, bytes[boundary - 1] != Self.newline { boundary -= 1 }
+        if boundary > 0 { return Array(bytes[0..<boundary]) }
+
+        var cut = maxBytes / 2
+        while cut > 0, (bytes[cut] & 0xC0) == 0x80 { cut -= 1 }
+        return Array(bytes[0..<cut]) + [Self.newline]
     }
 }

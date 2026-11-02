@@ -408,7 +408,7 @@ public final class AppViewModel {
     }
 
     public static func defaultMountPoint(for name: String) -> String {
-        let fallback = "AutoVolume"
+        let fallback = "NetDiskMount"
         let sanitizedName = name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "/", with: "-")

@@ -7,6 +7,7 @@ public final class AgentEngine {
     private let mountPlanner: MountPlanner
     private let mountExposure: MountExposure
     private let validatesAfterMount: Bool
+    private let mountTable: SystemMountTable?
 
     public init(
         mountState: MountStateProvider,
@@ -14,7 +15,8 @@ public final class AgentEngine {
         commandRunner: CommandRunner,
         mountPlanner: MountPlanner,
         mountExposure: MountExposure = MountExposure(),
-        validatesAfterMount: Bool = false
+        validatesAfterMount: Bool = false,
+        mountTable: SystemMountTable? = nil
     ) {
         self.mountState = mountState
         self.credentialStore = credentialStore
@@ -22,6 +24,7 @@ public final class AgentEngine {
         self.mountPlanner = mountPlanner
         self.mountExposure = mountExposure
         self.validatesAfterMount = validatesAfterMount
+        self.mountTable = mountTable
     }
 
     public func check(_ config: VolumeConfig) throws -> VolumeStatus {
@@ -41,7 +44,7 @@ public final class AgentEngine {
 
     private func mount(_ config: VolumeConfig) throws -> VolumeStatus {
         let password = try credentialStore.password(for: config.id)
-        try mountExposure.prepare(config: config, planner: mountPlanner)
+        try prepareMountPoint(for: config)
         let result = try runMount(config: config, password: password)
         if result.exitCode == 0 {
             try mountExposure.expose(config: config, planner: mountPlanner)
@@ -55,6 +58,27 @@ public final class AgentEngine {
             return .failed(message: result.stderr)
         }
         return mountCommandFailedStatus(exitCode: result.exitCode)
+    }
+
+    /// A dead mount that still occupies the mount point makes the directory impossible to create
+    /// ("The file “video” couldn’t be saved in the folder “Volumes”"). Without this the agent failed the
+    /// same way on every check — 73 times in an hour in issue #2 — until the Mac was rebooted. Clear
+    /// whatever is mounted there and try once more; if it is still unusable the error surfaces.
+    ///
+    /// Only a mount sitting at exactly the path that could not be prepared is cleared. The same share
+    /// mounted somewhere else (say by Finder) is the user's, and an unrelated error such as a permission
+    /// problem must never force-eject it.
+    private func prepareMountPoint(for config: VolumeConfig) throws {
+        do {
+            try mountExposure.prepare(config: config, planner: mountPlanner)
+        } catch {
+            let mountPoint = mountPlanner.effectiveMountPoint(for: config)
+            let table = (mountTable ?? SystemMountTable()).snapshot()
+            guard table.hasMount(atPath: mountPoint) else { throw error }
+            _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+            _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+            try mountExposure.prepare(config: config, planner: mountPlanner)
+        }
     }
 
     private func runMount(config: VolumeConfig, password: String?) throws -> CommandResult {

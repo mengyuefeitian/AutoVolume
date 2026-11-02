@@ -23,6 +23,8 @@ let mountPlanner = MountPlanner()
 var scheduler = CheckScheduler()
 let alertStore = AlertStore()
 var networkFailedVolumeIDs = Set<UUID>()
+/// Remembers what was last logged per volume so a healthy volume is logged once, not on every check.
+var statusLogTracker = StatusTransitionTracker()
 /// Guards `runCheckCycle` against overlapping runs: the periodic 60s timer and the real-time
 /// watchers added in later tasks all funnel through the same entry point, and a check pass can
 /// take several seconds (each unreachable volume's connectivity test has its own multi-second
@@ -198,18 +200,22 @@ func checkVolumes(configs: [VolumeConfig], now: Date, bypassSchedule: Bool) {
             let connectivity = try serverReachability(config)
             guard connectivity.isReachable else {
                 networkFailedVolumeIDs.insert(config.id)
+                let isNewOutage = statusLogTracker.shouldLog(volumeID: config.id, state: "unreachable")
                 scheduler.markChecked(volumeID: config.id, at: retryCheckedDate(interval: config.checkIntervalSeconds, retryInterval: 60, now: now))
-                AutoVolumeLogger.shared.warning("Server is not reachable for \(config.name): \(connectivity.message ?? "network unavailable")")
+                if isNewOutage {
+                    AutoVolumeLogger.shared.warning("Server is not reachable for \(config.name): \(connectivity.message ?? "network unavailable")")
+                }
                 if let key = connectivity.messageKey {
                     try? alertStore.record(volumeID: config.id, volumeName: config.name, key: key, args: connectivity.messageArgs, date: now)
                 } else {
-                    try? alertStore.record(volumeID: config.id, volumeName: config.name, message: connectivity.message ?? "Server is not reachable. AutoVolume will retry after the network returns.", date: now)
+                    try? alertStore.record(volumeID: config.id, volumeName: config.name, message: connectivity.message ?? "Server is not reachable. NetDiskMount will retry after the network returns.", date: now)
                 }
                 continue
             }
 
             let status: VolumeStatus
-            let wasMounted = mountStateProvider.isMounted(config: config)
+            let statusBefore = mountStateProvider.mountStatus(config: config)
+            let wasMounted = statusBefore.isMounted
             if networkFailedVolumeIDs.contains(config.id) {
                 status = try engine.reconnect(config)
                 if status == .mounted {
@@ -226,23 +232,30 @@ func checkVolumes(configs: [VolumeConfig], now: Date, bypassSchedule: Bool) {
             case .mounted:
                 networkFailedVolumeIDs.remove(config.id)
                 try? alertStore.resolve(volumeID: config.id)
-                AutoVolumeLogger.shared.info("Agent check mounted for \(config.name)")
+                if statusLogTracker.shouldLog(volumeID: config.id, state: "mounted") {
+                    AutoVolumeLogger.shared.info("Agent check mounted for \(config.name) at \(statusBefore.entry?.mountPoint ?? mountPlanner.browsePath(for: config))")
+                }
             case .failed(let message, let key, let args):
                 if let key {
                     try? alertStore.record(volumeID: config.id, volumeName: config.name, key: L10nKey(rawValue: key), args: args, date: now)
                 } else {
                     try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
                 }
-                AutoVolumeLogger.shared.warning("Agent check failed for \(config.name): \(message)")
+                if statusLogTracker.shouldLog(volumeID: config.id, state: "failed: \(message)") {
+                    AutoVolumeLogger.shared.warning("Agent check failed for \(config.name): \(message)\(statusBefore.foundElsewhere.map { " (same share is mounted at \($0.mountPoint))" } ?? "")")
+                }
             case .unmounted, .checking:
-                break
+                // Not worth a line, but remembered so the next "mounted" is reported as news.
+                _ = statusLogTracker.shouldLog(volumeID: config.id, state: "unmounted")
             }
         } catch {
             scheduler.markChecked(volumeID: config.id, at: checkedDate(for: error, interval: config.checkIntervalSeconds, now: now))
             let message = CommandResult.redacted(error.localizedDescription)
             try? alertStore.record(volumeID: config.id, volumeName: config.name, message: message, date: now)
-            AutoVolumeLogger.shared.error("Agent mount error for \(config.name): \(message)")
-            fputs("AutoVolumeAgent mount error for \(config.name): \(message)\n", stderr)
+            if statusLogTracker.shouldLog(volumeID: config.id, state: "error: \(message)") {
+                AutoVolumeLogger.shared.error("Agent mount error for \(config.name): \(message)")
+            }
+            fputs("NetDiskMountAgent mount error for \(config.name): \(message)\n", stderr)
         }
     }
 }
@@ -257,7 +270,7 @@ func performCheckCycle(bypassSchedule: Bool) {
         configs = try store.load()
     } catch {
         AutoVolumeLogger.shared.error("Agent config load error: \(error.localizedDescription)")
-        fputs("AutoVolumeAgent config error: \(error)\n", stderr)
+        fputs("NetDiskMountAgent config error: \(error)\n", stderr)
         return
     }
     serverReachabilityWatcher.sync(hosts: ServerHostSet.hosts(for: configs)) { host, isReachable in

@@ -39,7 +39,7 @@ public struct DiagnosticsExporter {
         let timestampFormatter = DateFormatter()
         timestampFormatter.dateFormat = "yyyyMMdd-HHmmss"
         timestampFormatter.timeZone = .current
-        let baseName = "AutoVolume-diagnostics-\(timestampFormatter.string(from: Date()))"
+        let baseName = "NetDiskMount-diagnostics-\(timestampFormatter.string(from: Date()))"
 
         let stagingDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let bundleDirectory = stagingDirectory.appendingPathComponent(baseName, isDirectory: true)
@@ -93,7 +93,7 @@ public struct DiagnosticsExporter {
         let info = appBundle.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "-"
         let build = info["CFBundleVersion"] as? String ?? "-"
-        lines.append("AutoVolume \(version) (\(build))")
+        lines.append("NetDiskMount \(version) (\(build))")
         lines.append("")
         lines.append("$ sw_vers")
         lines.append(run("/usr/bin/sw_vers", []))
@@ -122,7 +122,7 @@ public struct DiagnosticsExporter {
         // `BEGINSWITH` is one word — NSPredicate/`log show` rejects the two-word `BEGINS WITH`
         // with "Bad predicate" and exits immediately. That failure used to be silently
         // swallowed (see below), so it looked like `log show` just returned nothing.
-        let predicate = #"process == "ntfs-3g" OR process BEGINSWITH "go-nfsv4" OR process == "webdavfs_agent" OR process == "NetAuthAgent" OR process == "AutoVolume" OR process == "AutoVolumeAgent""#
+        let predicate = #"process == "ntfs-3g" OR process BEGINSWITH "go-nfsv4" OR process == "webdavfs_agent" OR process == "NetAuthAgent" OR process == "NetDiskMount" OR process == "NetDiskMountAgent" OR process == "AutoVolume" OR process == "AutoVolumeAgent""#
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
         process.arguments = ["show", "--last", window, "--style", "compact", "--predicate", predicate]

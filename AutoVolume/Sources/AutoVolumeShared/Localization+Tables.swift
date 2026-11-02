@@ -11,20 +11,20 @@ let enTable: [String: String] = [
     "alert.ntfs.onboarding": "NTFS drive \"%1$@\" detected. Turn on Settings → NTFS → \"Automatically mount external NTFS drives read-write\" to mount it read-write.",
     "alert.ntfs.installFailed": "NTFS driver installation failed or was canceled. \"%1$@\" remains read-only. Turn Settings → NTFS → \"Automatically mount external NTFS drives read-write\" off and back on to retry.",
     "alert.ntfs.mountFailed": "NTFS drive \"%1$@\" failed to mount read-write: %2$@. It remains read-only.",
-    "alert.ntfs.hibernationRecovered": "NTFS drive \"%1$@\" was left hibernated by Windows (Fast Startup or sleep). AutoVolume cleared the hibernation state and mounted it read-write automatically.",
+    "alert.ntfs.hibernationRecovered": "NTFS drive \"%1$@\" was left hibernated by Windows (Fast Startup or sleep). NetDiskMount cleared the hibernation state and mounted it read-write automatically.",
     "error.connectivity.webdav.unauthorized": "WebDAV authentication failed (401 Unauthorized). Check the username, password, and account permission for this remote path.",
     "error.connectivity.webdav.forbidden": "WebDAV access was denied (403 Forbidden). Check whether this account can access the configured remote path.",
     "error.connectivity.webdav.notFound": "WebDAV remote path was not found. Check the remote path format and folder name.",
-    "error.connectivity.unreachable": "%1$@ server is not reachable now. AutoVolume will retry after the network returns.",
-    "error.connectivity.smb.unreachable": "SMB server is not reachable on port 445. AutoVolume will retry after the network returns.",
-    "error.connectivity.afp.unreachable": "AFP server is not reachable on port 548. AutoVolume will retry after the network returns.",
+    "error.connectivity.unreachable": "%1$@ server is not reachable now. NetDiskMount will retry after the network returns.",
+    "error.connectivity.smb.unreachable": "SMB server is not reachable on port 445. NetDiskMount will retry after the network returns.",
+    "error.connectivity.afp.unreachable": "AFP server is not reachable on port 548. NetDiskMount will retry after the network returns.",
     "error.connectivity.nfs.unreachable": "NFS server is not reachable on port 2049. Check the NFS service, firewall, export path, or network access.",
     "error.connectivity.testFailed": "%1$@ connection test failed with exit code %2$@.",
     "error.agent.mountCommandFailed": "Mount command failed with exit code %1$@.",
-    "error.agent.mountUnresponsive": "Mount command succeeded, but the mounted volume did not respond. AutoVolume will retry on the next check.",
+    "error.agent.mountUnresponsive": "Mount command succeeded, but the mounted volume did not respond. NetDiskMount will retry on the next check.",
 
     // Task 4: full app UI
-    "app.productName": "AutoVolume",
+    "app.productName": "NetDiskMount",
 
     "list.emptyTitle": "No Volumes",
     "list.emptyDescription": "Add a network volume to keep it connected.",
@@ -75,7 +75,7 @@ let enTable: [String: String] = [
     "menu.checkForUpdates": "Check for Updates…",
     "menu.quit": "Quit",
 
-    "about.productName": "AutoVolume",
+    "about.productName": "NetDiskMount",
     "about.version": "Version %1$@ (%2$@)",
     "about.website": "Website",
 
@@ -88,7 +88,7 @@ let enTable: [String: String] = [
     "error.command.finderFailed": "Finder failed with exit code %1$@.",
     "error.command.genericFailed": "Command failed.",
 
-    "error.mount.webdavFinder5014": "macOS WebDAV/Finder mount service returned -5014. This is a macOS mount-layer failure, not a credential error; quit AutoVolume and restart macOS, which usually clears it.",
+    "error.mount.webdavFinder5014": "macOS WebDAV/Finder mount service returned -5014. This is a macOS mount-layer failure, not a credential error; quit NetDiskMount and restart macOS, which usually clears it.",
     "error.mount.webdavExit22": "WebDAV connectivity passed, but macOS Finder mount failed with exit code 22.",
     "error.mount.volumeNotResponding": "Mount command succeeded, but the mounted volume did not respond.",
     "error.mount.volumeNotRespondingAfterStaleClear": "Mount command succeeded, but the mounted volume did not respond after clearing a stale mount.",
@@ -133,20 +133,20 @@ let zhTable: [String: String] = [
     "alert.ntfs.onboarding": "检测到 NTFS 硬盘「%1$@」。前往 设置 → NTFS →「自动以读写方式挂载 NTFS 外接硬盘」开启后即可以读写方式挂载。",
     "alert.ntfs.installFailed": "NTFS 驱动安装失败或被取消，「%1$@」已保留为只读。可在 设置 → NTFS 中关闭再开启「自动以读写方式挂载 NTFS 外接硬盘」以重试。",
     "alert.ntfs.mountFailed": "NTFS 硬盘「%1$@」读写挂载失败：%2$@。已保留为只读。",
-    "alert.ntfs.hibernationRecovered": "NTFS 硬盘「%1$@」处于 Windows 休眠/快速启动状态，AutoVolume 已自动清除该状态并完成读写挂载。",
+    "alert.ntfs.hibernationRecovered": "NTFS 硬盘「%1$@」处于 Windows 休眠/快速启动状态，NetDiskMount 已自动清除该状态并完成读写挂载。",
     "error.connectivity.webdav.unauthorized": "WebDAV 身份验证失败（401 Unauthorized）。请检查用户名、密码以及该远程路径的账号权限。",
     "error.connectivity.webdav.forbidden": "WebDAV 访问被拒绝（403 Forbidden）。请检查该账号是否有权访问所配置的远程路径。",
     "error.connectivity.webdav.notFound": "未找到 WebDAV 远程路径。请检查远程路径格式和文件夹名称。",
-    "error.connectivity.unreachable": "%1$@ 服务器当前无法连接。网络恢复后 AutoVolume 会自动重试。",
-    "error.connectivity.smb.unreachable": "SMB 服务器的 445 端口无法连接。网络恢复后 AutoVolume 会自动重试。",
-    "error.connectivity.afp.unreachable": "AFP 服务器的 548 端口无法连接。网络恢复后 AutoVolume 会自动重试。",
+    "error.connectivity.unreachable": "%1$@ 服务器当前无法连接。网络恢复后 NetDiskMount 会自动重试。",
+    "error.connectivity.smb.unreachable": "SMB 服务器的 445 端口无法连接。网络恢复后 NetDiskMount 会自动重试。",
+    "error.connectivity.afp.unreachable": "AFP 服务器的 548 端口无法连接。网络恢复后 NetDiskMount 会自动重试。",
     "error.connectivity.nfs.unreachable": "NFS 服务器的 2049 端口无法连接。请检查 NFS 服务、防火墙、导出路径或网络访问权限。",
     "error.connectivity.testFailed": "%1$@ 连接测试失败，退出码为 %2$@。",
     "error.agent.mountCommandFailed": "挂载命令失败，退出码为 %1$@。",
-    "error.agent.mountUnresponsive": "挂载命令执行成功，但挂载的卷未响应。AutoVolume 将在下次检查时重试。",
+    "error.agent.mountUnresponsive": "挂载命令执行成功，但挂载的卷未响应。NetDiskMount 将在下次检查时重试。",
 
     // Task 4: full app UI
-    "app.productName": "智卷",
+    "app.productName": "NetDiskMount",
 
     "list.emptyTitle": "暂无卷",
     "list.emptyDescription": "添加网络卷后，智卷会保持它在线。",
@@ -197,7 +197,7 @@ let zhTable: [String: String] = [
     "menu.checkForUpdates": "检查更新…",
     "menu.quit": "退出",
 
-    "about.productName": "智卷 AutoVolume",
+    "about.productName": "NetDiskMount",
     "about.version": "版本 %1$@ (%2$@)",
     "about.website": "官网",
 
@@ -210,7 +210,7 @@ let zhTable: [String: String] = [
     "error.command.finderFailed": "Finder 操作失败，退出码为 %1$@。",
     "error.command.genericFailed": "命令执行失败。",
 
-    "error.mount.webdavFinder5014": "macOS WebDAV/Finder 挂载服务返回 -5014。AutoVolume 已验证到这是系统挂载层异常，不是账号密码错误；请先退出 AutoVolume 并重启 macOS，重启后通常会立即恢复。",
+    "error.mount.webdavFinder5014": "macOS WebDAV/Finder 挂载服务返回 -5014。NetDiskMount 已验证到这是系统挂载层异常，不是账号密码错误；请先退出 NetDiskMount 并重启 macOS，重启后通常会立即恢复。",
     "error.mount.webdavExit22": "WebDAV 连通性测试已通过，但 macOS Finder 挂载失败，退出码为 22。",
     "error.mount.volumeNotResponding": "挂载命令执行成功，但挂载的卷未响应。",
     "error.mount.volumeNotRespondingAfterStaleClear": "挂载命令执行成功，但清除失效挂载后，挂载的卷仍未响应。",
@@ -255,20 +255,20 @@ let koTable: [String: String] = [
     "alert.ntfs.onboarding": "NTFS 드라이브 \"%1$@\"이(가) 감지되었습니다. 설정 → NTFS → \"외장 NTFS 드라이브를 읽기/쓰기로 자동 마운트\"를 켜면 읽기/쓰기 방식으로 마운트할 수 있습니다.",
     "alert.ntfs.installFailed": "NTFS 드라이버 설치에 실패했거나 취소되었습니다. \"%1$@\"은(는) 읽기 전용으로 유지됩니다. 설정 → NTFS에서 \"외장 NTFS 드라이브를 읽기/쓰기로 자동 마운트\"를 껐다가 다시 켜서 재시도하세요.",
     "alert.ntfs.mountFailed": "NTFS 드라이브 \"%1$@\" 읽기/쓰기 마운트에 실패했습니다: %2$@. 읽기 전용으로 유지됩니다.",
-    "alert.ntfs.hibernationRecovered": "NTFS 드라이브 \"%1$@\"가 Windows 최대 절전 모드/빠른 시작 상태였습니다. AutoVolume이 이 상태를 자동으로 정리하고 읽기/쓰기로 마운트했습니다.",
+    "alert.ntfs.hibernationRecovered": "NTFS 드라이브 \"%1$@\"가 Windows 최대 절전 모드/빠른 시작 상태였습니다. NetDiskMount가 이 상태를 자동으로 정리하고 읽기/쓰기로 마운트했습니다.",
     "error.connectivity.webdav.unauthorized": "WebDAV 인증에 실패했습니다 (401 Unauthorized). 사용자 이름, 비밀번호, 이 원격 경로에 대한 계정 권한을 확인하세요.",
     "error.connectivity.webdav.forbidden": "WebDAV 접근이 거부되었습니다 (403 Forbidden). 이 계정이 설정된 원격 경로에 접근할 수 있는지 확인하세요.",
     "error.connectivity.webdav.notFound": "WebDAV 원격 경로를 찾을 수 없습니다. 원격 경로 형식과 폴더 이름을 확인하세요.",
-    "error.connectivity.unreachable": "%1$@ 서버에 연결할 수 없습니다. 네트워크가 복구되면 AutoVolume이 다시 시도합니다.",
-    "error.connectivity.smb.unreachable": "SMB 서버의 445번 포트에 연결할 수 없습니다. 네트워크가 복구되면 AutoVolume이 다시 시도합니다.",
-    "error.connectivity.afp.unreachable": "AFP 서버의 548번 포트에 연결할 수 없습니다. 네트워크가 복구되면 AutoVolume이 다시 시도합니다.",
+    "error.connectivity.unreachable": "%1$@ 서버에 연결할 수 없습니다. 네트워크가 복구되면 NetDiskMount가 다시 시도합니다.",
+    "error.connectivity.smb.unreachable": "SMB 서버의 445번 포트에 연결할 수 없습니다. 네트워크가 복구되면 NetDiskMount가 다시 시도합니다.",
+    "error.connectivity.afp.unreachable": "AFP 서버의 548번 포트에 연결할 수 없습니다. 네트워크가 복구되면 NetDiskMount가 다시 시도합니다.",
     "error.connectivity.nfs.unreachable": "NFS 서버의 2049번 포트에 연결할 수 없습니다. NFS 서비스, 방화벽, 내보내기 경로 또는 네트워크 접근 권한을 확인하세요.",
     "error.connectivity.testFailed": "%1$@ 연결 테스트가 종료 코드 %2$@(으)로 실패했습니다.",
     "error.agent.mountCommandFailed": "마운트 명령이 종료 코드 %1$@(으)로 실패했습니다.",
-    "error.agent.mountUnresponsive": "마운트 명령은 성공했지만 마운트된 볼륨이 응답하지 않았습니다. AutoVolume이 다음 확인 시 다시 시도합니다.",
+    "error.agent.mountUnresponsive": "마운트 명령은 성공했지만 마운트된 볼륨이 응답하지 않았습니다. NetDiskMount가 다음 확인 시 다시 시도합니다.",
 
     // Task 4: full app UI
-    "app.productName": "AutoVolume",
+    "app.productName": "NetDiskMount",
 
     "list.emptyTitle": "볼륨 없음",
     "list.emptyDescription": "네트워크 볼륨을 추가하면 계속 연결 상태를 유지합니다.",
@@ -319,7 +319,7 @@ let koTable: [String: String] = [
     "menu.checkForUpdates": "업데이트 확인…",
     "menu.quit": "종료",
 
-    "about.productName": "AutoVolume",
+    "about.productName": "NetDiskMount",
     "about.version": "버전 %1$@ (%2$@)",
     "about.website": "웹사이트",
 
@@ -332,7 +332,7 @@ let koTable: [String: String] = [
     "error.command.finderFailed": "Finder 작업이 종료 코드 %1$@(으)로 실패했습니다.",
     "error.command.genericFailed": "명령 실행에 실패했습니다.",
 
-    "error.mount.webdavFinder5014": "macOS WebDAV/Finder 마운트 서비스가 -5014를 반환했습니다. 이는 계정/비밀번호 오류가 아니라 macOS 마운트 계층의 오류입니다. AutoVolume을 종료하고 macOS를 재시작하면 대부분 해결됩니다.",
+    "error.mount.webdavFinder5014": "macOS WebDAV/Finder 마운트 서비스가 -5014를 반환했습니다. 이는 계정/비밀번호 오류가 아니라 macOS 마운트 계층의 오류입니다. NetDiskMount를 종료하고 macOS를 재시작하면 대부분 해결됩니다.",
     "error.mount.webdavExit22": "WebDAV 연결 테스트는 통과했지만 macOS Finder 마운트가 종료 코드 22로 실패했습니다.",
     "error.mount.volumeNotResponding": "마운트 명령은 성공했지만 마운트된 볼륨이 응답하지 않았습니다.",
     "error.mount.volumeNotRespondingAfterStaleClear": "마운트 명령은 성공했지만, 오래된 마운트를 정리한 후에도 볼륨이 응답하지 않았습니다.",
@@ -377,20 +377,20 @@ let jaTable: [String: String] = [
     "alert.ntfs.onboarding": "NTFS ドライブ「%1$@」を検出しました。設定 → NTFS →「外付け NTFS ドライブを読み書きで自動マウント」を有効にすると読み書きでマウントできます。",
     "alert.ntfs.installFailed": "NTFS ドライバのインストールに失敗またはキャンセルされました。「%1$@」は読み取り専用のままです。設定 → NTFS で「外付け NTFS ドライブを読み書きで自動マウント」をオフにしてから再度オンにして再試行してください。",
     "alert.ntfs.mountFailed": "NTFS ドライブ「%1$@」の読み書きマウントに失敗しました: %2$@。読み取り専用のままです。",
-    "alert.ntfs.hibernationRecovered": "NTFS ドライブ「%1$@」は Windows の休止状態/高速スタートアップのままでした。AutoVolume が自動的にこの状態を解除し、読み書きでマウントしました。",
+    "alert.ntfs.hibernationRecovered": "NTFS ドライブ「%1$@」は Windows の休止状態/高速スタートアップのままでした。NetDiskMount が自動的にこの状態を解除し、読み書きでマウントしました。",
     "error.connectivity.webdav.unauthorized": "WebDAV の認証に失敗しました（401 Unauthorized）。ユーザー名、パスワード、このリモートパスへのアカウント権限を確認してください。",
     "error.connectivity.webdav.forbidden": "WebDAV へのアクセスが拒否されました（403 Forbidden）。このアカウントが設定されたリモートパスにアクセスできるか確認してください。",
     "error.connectivity.webdav.notFound": "WebDAV のリモートパスが見つかりませんでした。リモートパスの形式とフォルダ名を確認してください。",
-    "error.connectivity.unreachable": "%1$@ サーバーに接続できません。ネットワークが復旧すると AutoVolume が再試行します。",
-    "error.connectivity.smb.unreachable": "SMB サーバーのポート 445 に接続できません。ネットワークが復旧すると AutoVolume が再試行します。",
-    "error.connectivity.afp.unreachable": "AFP サーバーのポート 548 に接続できません。ネットワークが復旧すると AutoVolume が再試行します。",
+    "error.connectivity.unreachable": "%1$@ サーバーに接続できません。ネットワークが復旧すると NetDiskMount が再試行します。",
+    "error.connectivity.smb.unreachable": "SMB サーバーのポート 445 に接続できません。ネットワークが復旧すると NetDiskMount が再試行します。",
+    "error.connectivity.afp.unreachable": "AFP サーバーのポート 548 に接続できません。ネットワークが復旧すると NetDiskMount が再試行します。",
     "error.connectivity.nfs.unreachable": "NFS サーバーのポート 2049 に接続できません。NFS サービス、ファイアウォール、エクスポートパス、ネットワークアクセスを確認してください。",
     "error.connectivity.testFailed": "%1$@ 接続テストが終了コード %2$@ で失敗しました。",
     "error.agent.mountCommandFailed": "マウントコマンドが終了コード %1$@ で失敗しました。",
-    "error.agent.mountUnresponsive": "マウントコマンドは成功しましたが、マウントされたボリュームが応答しませんでした。次回のチェックで AutoVolume が再試行します。",
+    "error.agent.mountUnresponsive": "マウントコマンドは成功しましたが、マウントされたボリュームが応答しませんでした。次回のチェックで NetDiskMount が再試行します。",
 
     // Task 4: full app UI
-    "app.productName": "AutoVolume",
+    "app.productName": "NetDiskMount",
 
     "list.emptyTitle": "ボリュームなし",
     "list.emptyDescription": "ネットワークボリュームを追加すると、接続状態を保ちます。",
@@ -441,7 +441,7 @@ let jaTable: [String: String] = [
     "menu.checkForUpdates": "アップデートを確認…",
     "menu.quit": "終了",
 
-    "about.productName": "AutoVolume",
+    "about.productName": "NetDiskMount",
     "about.version": "バージョン %1$@ (%2$@)",
     "about.website": "ウェブサイト",
 
@@ -454,7 +454,7 @@ let jaTable: [String: String] = [
     "error.command.finderFailed": "Finder の操作が終了コード %1$@ で失敗しました。",
     "error.command.genericFailed": "コマンドが失敗しました。",
 
-    "error.mount.webdavFinder5014": "macOS の WebDAV/Finder マウントサービスが -5014 を返しました。これはアカウントやパスワードの誤りではなく、macOS のマウント層の不具合です。AutoVolume を終了して macOS を再起動すると、通常はすぐに解消します。",
+    "error.mount.webdavFinder5014": "macOS の WebDAV/Finder マウントサービスが -5014 を返しました。これはアカウントやパスワードの誤りではなく、macOS のマウント層の不具合です。NetDiskMount を終了して macOS を再起動すると、通常はすぐに解消します。",
     "error.mount.webdavExit22": "WebDAV の接続テストは成功しましたが、macOS Finder のマウントが終了コード 22 で失敗しました。",
     "error.mount.volumeNotResponding": "マウントコマンドは成功しましたが、マウントされたボリュームが応答しませんでした。",
     "error.mount.volumeNotRespondingAfterStaleClear": "マウントコマンドは成功しましたが、古いマウントを解除した後もボリュームが応答しませんでした。",
@@ -499,23 +499,23 @@ let ruTable: [String: String] = [
     "alert.ntfs.onboarding": "Обнаружен диск NTFS «%1$@». Включите в настройках NTFS → «Автоматически подключать внешние диски NTFS для чтения и записи», чтобы подключить его для чтения и записи.",
     "alert.ntfs.installFailed": "Не удалось установить драйвер NTFS, либо установка была отменена. «%1$@» остаётся доступным только для чтения. Выключите и снова включите в настройках NTFS → «Автоматически подключать внешние диски NTFS для чтения и записи», чтобы повторить попытку.",
     "alert.ntfs.mountFailed": "Не удалось подключить диск NTFS «%1$@» для чтения и записи: %2$@. Диск остаётся доступным только для чтения.",
-    "alert.ntfs.hibernationRecovered": "Диск NTFS «%1$@» находился в состоянии гибернации/быстрого запуска Windows. AutoVolume автоматически сбросил это состояние и подключил диск для чтения и записи.",
+    "alert.ntfs.hibernationRecovered": "Диск NTFS «%1$@» находился в состоянии гибернации/быстрого запуска Windows. NetDiskMount автоматически сбросил это состояние и подключил диск для чтения и записи.",
     "error.connectivity.webdav.unauthorized": "Ошибка аутентификации WebDAV (401 Unauthorized). Проверьте имя пользователя, пароль и права доступа учётной записи к этому удалённому пути.",
     "error.connectivity.webdav.forbidden": "Доступ к WebDAV запрещён (403 Forbidden). Проверьте, есть ли у этой учётной записи доступ к настроенному удалённому пути.",
     "error.connectivity.webdav.notFound": "Удалённый путь WebDAV не найден. Проверьте формат удалённого пути и имя папки.",
-    "error.connectivity.unreachable": "Сервер %1$@ сейчас недоступен. AutoVolume повторит попытку после восстановления сети.",
-    "error.connectivity.smb.unreachable": "Сервер SMB недоступен на порту 445. AutoVolume повторит попытку после восстановления сети.",
-    "error.connectivity.afp.unreachable": "Сервер AFP недоступен на порту 548. AutoVolume повторит попытку после восстановления сети.",
+    "error.connectivity.unreachable": "Сервер %1$@ сейчас недоступен. NetDiskMount повторит попытку после восстановления сети.",
+    "error.connectivity.smb.unreachable": "Сервер SMB недоступен на порту 445. NetDiskMount повторит попытку после восстановления сети.",
+    "error.connectivity.afp.unreachable": "Сервер AFP недоступен на порту 548. NetDiskMount повторит попытку после восстановления сети.",
     "error.connectivity.nfs.unreachable": "Сервер NFS недоступен на порту 2049. Проверьте службу NFS, брандмауэр, экспортируемый путь и доступ к сети.",
     "error.connectivity.testFailed": "Проверка соединения %1$@ завершилась с кодом выхода %2$@.",
     "error.agent.mountCommandFailed": "Команда подключения завершилась с кодом выхода %1$@.",
-    "error.agent.mountUnresponsive": "Команда подключения выполнена успешно, но подключённый том не отвечает. AutoVolume повторит попытку при следующей проверке.",
+    "error.agent.mountUnresponsive": "Команда подключения выполнена успешно, но подключённый том не отвечает. NetDiskMount повторит попытку при следующей проверке.",
 
     // Task 4: full app UI
-    "app.productName": "AutoVolume",
+    "app.productName": "NetDiskMount",
 
     "list.emptyTitle": "Нет томов",
-    "list.emptyDescription": "Добавьте сетевой том, чтобы AutoVolume поддерживал его подключение.",
+    "list.emptyDescription": "Добавьте сетевой том, чтобы NetDiskMount поддерживал его подключение.",
     "list.add": "Добавить",
     "list.edit": "Изменить",
     "list.remove": "Удалить",
@@ -563,7 +563,7 @@ let ruTable: [String: String] = [
     "menu.checkForUpdates": "Проверить обновления…",
     "menu.quit": "Выйти",
 
-    "about.productName": "AutoVolume",
+    "about.productName": "NetDiskMount",
     "about.version": "Версия %1$@ (%2$@)",
     "about.website": "Веб-сайт",
 
@@ -576,7 +576,7 @@ let ruTable: [String: String] = [
     "error.command.finderFailed": "Операция Finder завершилась с кодом выхода %1$@.",
     "error.command.genericFailed": "Команда завершилась с ошибкой.",
 
-    "error.mount.webdavFinder5014": "Служба подключения WebDAV/Finder в macOS вернула ошибку -5014. Это сбой уровня подключения macOS, а не неверные учётные данные; выйдите из AutoVolume и перезагрузите macOS — обычно это сразу устраняет проблему.",
+    "error.mount.webdavFinder5014": "Служба подключения WebDAV/Finder в macOS вернула ошибку -5014. Это сбой уровня подключения macOS, а не неверные учётные данные; выйдите из NetDiskMount и перезагрузите macOS — обычно это сразу устраняет проблему.",
     "error.mount.webdavExit22": "Проверка соединения WebDAV прошла успешно, но подключение через Finder в macOS завершилось с кодом выхода 22.",
     "error.mount.volumeNotResponding": "Команда подключения выполнена успешно, но подключённый том не отвечает.",
     "error.mount.volumeNotRespondingAfterStaleClear": "Команда подключения выполнена успешно, но том не отвечает даже после устранения устаревшего подключения.",

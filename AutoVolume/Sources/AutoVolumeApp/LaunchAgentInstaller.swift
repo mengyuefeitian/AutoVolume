@@ -6,7 +6,7 @@ enum LaunchAgentInstaller {
     private static let label = "com.autovolume.agent"
 
     static func installAndStart(bundle: Bundle = .main) {
-        guard let agentURL = bundle.url(forResource: "AutoVolumeAgent", withExtension: nil) else {
+        guard let agentURL = bundle.url(forResource: "NetDiskMountAgent", withExtension: nil) else {
             return
         }
 
@@ -24,12 +24,12 @@ enum LaunchAgentInstaller {
             restartAgent(plistURL: plistURL)
         } catch {
             AutoVolumeLogger.shared.error("LaunchAgent install error: \(error.localizedDescription)")
-            fputs("AutoVolume LaunchAgent install error: \(error)\n", stderr)
+            fputs("NetDiskMount LaunchAgent install error: \(error)\n", stderr)
         }
     }
 
     static func stop() {
-        AutoVolumeLogger.shared.info("Stopping AutoVolumeAgent")
+        AutoVolumeLogger.shared.info("Stopping NetDiskMountAgent")
         let domain = "gui/\(getuid())"
         guard let launchAgentsDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.appendingPathComponent("LaunchAgents", isDirectory: true) else {
             return
@@ -102,7 +102,10 @@ enum LaunchAgentInstaller {
     private static func terminateResidualAgents() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        process.arguments = ["-f", "/AutoVolume.app/Contents/Resources/AutoVolumeAgent"]
+        // Matches the agent of either generation: an installed copy upgraded by Sparkle keeps living in
+        // "AutoVolume.app" (Sparkle installs over the old path) but runs "NetDiskMountAgent", and a
+        // process left over from before the rename is still "AutoVolumeAgent".
+        process.arguments = ["-f", "/(AutoVolume|NetDiskMount)\\.app/Contents/Resources/(AutoVolume|NetDiskMount)Agent"]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
         do {

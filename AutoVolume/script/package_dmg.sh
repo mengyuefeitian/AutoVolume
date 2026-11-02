@@ -2,14 +2,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/dist/AutoVolume.app"
+APP="$ROOT/dist/NetDiskMount.app"
 VERSION="${1:?Usage: package_dmg.sh <version> (must match Info.plist CFBundleShortVersionString, optionally with a -suffix)}"
 # Every release ships two installers, so the architecture is encoded in the
 # artifact name. TARGET_ARCH must match the arch the app bundle was built for —
 # check_binary_compat.sh (run at build time) is what guarantees that.
 #
-# Both architectures carry an explicit marker: "AutoVolume-<v>-arm64.dmg" and
-# "AutoVolume-<v>-x86_64.dmg". Releases up to and including 0.1.59 shipped arm64
+# Both architectures carry an explicit marker: "NetDiskMount-<v>-arm64.dmg" and
+# "NetDiskMount-<v>-x86_64.dmg". (The product was called AutoVolume before 1.0.0; artifacts
+# published under that name keep their names so existing download URLs stay valid.)
+# Releases up to and including 0.1.59 shipped arm64
 # as the unmarked "AutoVolume-<v>.dmg" to keep the published download URLs
 # stable; those artifacts stay as they are, and publish_release.sh still routes
 # an unmarked name to the arm64 feed so a re-publish of an old build is safe.
@@ -19,9 +21,9 @@ case "$ARCH" in
   x86_64) ARTIFACT_SUFFIX="-x86_64" ;;
   *) echo "error: TARGET_ARCH must be arm64 or x86_64 (got '$ARCH')" >&2; exit 1 ;;
 esac
-echo "Packaging AutoVolume $VERSION for $ARCH"
-DMG="$ROOT/dist/AutoVolume-$VERSION$ARTIFACT_SUFFIX.dmg"
-RW_DMG="$ROOT/dist/AutoVolume-$VERSION$ARTIFACT_SUFFIX-rw.dmg"
+echo "Packaging NetDiskMount $VERSION for $ARCH"
+DMG="$ROOT/dist/NetDiskMount-$VERSION$ARTIFACT_SUFFIX.dmg"
+RW_DMG="$ROOT/dist/NetDiskMount-$VERSION$ARTIFACT_SUFFIX-rw.dmg"
 STAGING="$ROOT/dist/dmg-staging-$ARCH"
 MOUNT_POINT="$ROOT/dist/dmg-mount-$ARCH"
 BACKGROUND="$STAGING/.background/background.png"
@@ -53,7 +55,7 @@ if [[ "$VERSION" != "$APP_VERSION" && "$VERSION" != "$APP_VERSION"-* ]]; then
   exit 1
 fi
 # Collision check is per-architecture, not global: one release legitimately
-# produces AutoVolume-<v>-arm64.dmg and AutoVolume-<v>-x86_64.dmg side by side.
+# produces NetDiskMount-<v>-arm64.dmg and NetDiskMount-<v>-x86_64.dmg side by side.
 # Only a same-arch collision is a hard error.
 shopt -s nullglob
 existing=("$DMG")
@@ -66,13 +68,13 @@ for candidate in "${existing[@]}"; do
 done
 
 rm -rf "$STAGING" "$MOUNT_POINT" "$RW_DMG"
-for mounted_volume in /Volumes/AutoVolume*; do
+for mounted_volume in /Volumes/NetDiskMount* /Volumes/AutoVolume*; do
   if [[ -d "$mounted_volume" ]]; then
     hdiutil detach "$mounted_volume" >/dev/null 2>&1 || true
   fi
 done
 mkdir -p "$STAGING/.background"
-cp -R "$APP" "$STAGING/AutoVolume.app"
+cp -R "$APP" "$STAGING/NetDiskMount.app"
 /bin/ln -s /Applications "$STAGING/Applications"
 if [[ "$DMG_LAYOUT_MODE" == "snapshot" ]]; then
   [[ -f "$LAYOUT_SNAPSHOT" ]] || {
@@ -83,7 +85,7 @@ if [[ "$DMG_LAYOUT_MODE" == "snapshot" ]]; then
   cp "$LAYOUT_SNAPSHOT" "$STAGING/.DS_Store"
 fi
 cleanup() {
-  for mounted_volume in /Volumes/AutoVolume*; do
+  for mounted_volume in /Volumes/NetDiskMount* /Volumes/AutoVolume*; do
     if [[ -d "$mounted_volume" ]]; then
       hdiutil detach "$mounted_volume" >/dev/null 2>&1 || true
     fi
@@ -136,7 +138,7 @@ if let arrowImage = NSImage(contentsOfFile: arrowSource) {
 }
 
 let title = "拖入应用程序"
-let subtitle = "Drag AutoVolume into Applications"
+let subtitle = "Drag NetDiskMount into Applications"
 let titleAttributes: [NSAttributedString.Key: Any] = [
     .font: NSFont.systemFont(ofSize: 28, weight: .bold),
     .foregroundColor: NSColor(calibratedRed: 0.08, green: 0.13, blue: 0.22, alpha: 1.0)
@@ -145,8 +147,12 @@ let subtitleAttributes: [NSAttributedString.Key: Any] = [
     .font: NSFont.systemFont(ofSize: 15, weight: .medium),
     .foregroundColor: NSColor(calibratedRed: 0.35, green: 0.42, blue: 0.52, alpha: 1.0)
 ]
+func drawCentered(_ text: String, centerX: CGFloat, y: CGFloat, attributes: [NSAttributedString.Key: Any]) {
+    let width = (text as NSString).size(withAttributes: attributes).width
+    (text as NSString).draw(at: NSPoint(x: centerX - width / 2, y: y), withAttributes: attributes)
+}
 (title as NSString).draw(at: NSPoint(x: 218, y: 322), withAttributes: titleAttributes)
-(subtitle as NSString).draw(at: NSPoint(x: 205, y: 294), withAttributes: subtitleAttributes)
+drawCentered(subtitle, centerX: 322, y: 294, attributes: subtitleAttributes)
 
 let hintAttributes: [NSAttributedString.Key: Any] = [
     .font: NSFont.systemFont(ofSize: 13, weight: .regular),
@@ -155,7 +161,7 @@ let hintAttributes: [NSAttributedString.Key: Any] = [
 if let applicationsIcon = NSImage(contentsOfFile: "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/ApplicationsFolderIcon.icns") {
     applicationsIcon.draw(in: NSRect(x: 432, y: 154, width: 96, height: 96), from: .zero, operation: .sourceOver, fraction: 1.0)
 }
-("AutoVolume" as NSString).draw(at: NSPoint(x: 122, y: 96), withAttributes: hintAttributes)
+drawCentered("NetDiskMount", centerX: 160, y: 96, attributes: hintAttributes)
 ("Applications" as NSString).draw(at: NSPoint(x: 444, y: 96), withAttributes: hintAttributes)
 
 image.unlockFocus()
@@ -170,12 +176,12 @@ swiftc -o "$BACKGROUND_GENERATOR_BIN" "$BACKGROUND_GENERATOR_SRC"
 "$BACKGROUND_GENERATOR_BIN" "$BACKGROUND" "$ARROW_SOURCE"
 trap_generator_cleanup
 
-hdiutil create -volname AutoVolume -srcfolder "$STAGING" -ov -format UDRW -fs HFS+ "$RW_DMG" >/dev/null
+hdiutil create -volname NetDiskMount -srcfolder "$STAGING" -ov -format UDRW -fs HFS+ "$RW_DMG" >/dev/null
 attach_output="$(hdiutil attach "$RW_DMG" -readwrite)"
 device="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {print $1}')"
 volume_path="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {for (i=3; i<=NF; i++) {printf "%s%s", (i==3 ? "" : " "), $i}; print ""}')"
 if [[ -z "${volume_path:-}" || ! -d "$volume_path" ]]; then
-  volume_path="/Volumes/AutoVolume"
+  volume_path="/Volumes/NetDiskMount"
 fi
 
 rm -rf "$volume_path/.fseventsd"
@@ -202,7 +208,7 @@ tell application "Finder"
         set icon size of theViewOptions to 96
         set background picture of theViewOptions to file ".background:background.png"
         try
-            set position of item "AutoVolume.app" of container window to {160, 210}
+            set position of item "NetDiskMount.app" of container window to {160, 210}
         end try
         try
             set position of item "Applications" of container window to {480, 210}

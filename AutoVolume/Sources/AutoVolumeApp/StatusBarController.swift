@@ -26,7 +26,7 @@ final class StatusBarController: NSObject {
 
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
-        button.image = NSImage(systemSymbolName: Self.idleStatusImageName, accessibilityDescription: "AutoVolume")
+        button.image = NSImage(systemSymbolName: Self.idleStatusImageName, accessibilityDescription: "NetDiskMount")
         button.imagePosition = .imageOnly
         button.target = self
         button.action = #selector(statusItemClicked(_:))
@@ -54,7 +54,7 @@ final class StatusBarController: NSObject {
         guard let button = statusItem.button else { return }
         button.image = NSImage(
             systemSymbolName: isWorking ? Self.workingStatusImageName : Self.idleStatusImageName,
-            accessibilityDescription: "AutoVolume"
+            accessibilityDescription: "NetDiskMount"
         )
     }
 
@@ -78,6 +78,22 @@ final class StatusBarController: NSObject {
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
             AutoVolumeLogger.shared.info("Opened volume list")
+            // Statuses are otherwise only recomputed after an action, so the list could show a
+            // mount that has since gone away (or one that never succeeded) as healthy. The probes
+            // run off the main thread, so opening the list never waits on them.
+            refreshStatusesOnce()
+        }
+    }
+
+    /// At most one refresh runs at a time: opening and closing the list quickly must not stack up
+    /// probes against a hung mount.
+    private var statusRefreshTask: Task<Void, Never>?
+
+    private func refreshStatusesOnce() {
+        guard statusRefreshTask == nil else { return }
+        statusRefreshTask = Task { [weak self, viewModel] in
+            await viewModel.refreshVolumeStatusesAsync()
+            self?.statusRefreshTask = nil
         }
     }
 
