@@ -126,11 +126,11 @@ func testMountPlanning() throws {
 
     let nfs = VolumeConfig(name: "Exports", protocolType: .nfs, server: "nas.local", remotePath: "/exports/team", username: nil, mountPoint: "/Volumes/Exports", checkIntervalSeconds: 60, isEnabled: true)
     let nfsPlan = try MountPlanner().mountPlan(for: nfs, password: nil)
-    try expect(nfsPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["nas.local:/exports/team", "/Volumes/Exports"]), "NFS mount plan mismatch")
+    try expect(nfsPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["-o", "vers=3,hard,intr,nolocks,noowners,noatime,rsize=1048576,wsize=1048576", "nas.local:/exports/team", "/Volumes/Exports"]), "NFS mount plan mismatch")
 
     let nfsURLServer = VolumeConfig(name: "NFS Media", protocolType: .nfs, server: "nfs://nas.local/ignored", remotePath: "exports/media", username: nil, mountPoint: "/Volumes/Media", checkIntervalSeconds: 60, isEnabled: true)
     let nfsURLServerPlan = try MountPlanner().mountPlan(for: nfsURLServer, password: nil)
-    try expect(nfsURLServerPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["nas.local:/exports/media", "/Volumes/Media"]), "NFS should normalize server and remote subpath")
+    try expect(nfsURLServerPlan == CommandPlan(executable: "/sbin/mount_nfs", arguments: ["-o", "vers=3,hard,intr,nolocks,noowners,noatime,rsize=1048576,wsize=1048576", "nas.local:/exports/media", "/Volumes/Media"]), "NFS should normalize server and remote subpath")
 
     let afp = VolumeConfig(name: "AFP Media", protocolType: .afp, server: "afp://nas.local/root", remotePath: "/media/projects", username: "mei", mountPoint: "/Volumes/AFPMedia", checkIntervalSeconds: 60, isEnabled: true)
     let afpPlan = try MountPlanner().mountPlan(for: afp, password: "secret")
@@ -728,8 +728,8 @@ func testNFSQuietMountPlanUsesTheUsersProvenOptions() throws {
     let plan = try MountPlanner().mountPlan(for: nfs, password: nil, suppressesUserInterface: true)
     try expect(plan == CommandPlan(
         executable: "/sbin/mount_nfs",
-        arguments: ["-o", "soft,nolocks,noowners,noatime,rsize=1048576,wsize=1048576", "192.168.3.106:/volume1/video", "/Users/andy/Volumes/video"]
-    ), "NFS quiet mount plan should carry the options that mounted this NAS by hand, minus resvport (root only) and without pinning the NFS version, so negotiation is unchanged; got \(plan.arguments)")
+        arguments: ["-o", "vers=3,hard,intr,nolocks,noowners,noatime,rsize=1048576,wsize=1048576", "192.168.3.106:/volume1/video", "/Users/andy/Volumes/video"]
+    ), "NFS quiet mount plan should default to a hard, interruptible NFSv3 mount (no resvport: root only); got \(plan.arguments)")
 }
 
 func testNFSExportParsingReadsTheFirstColumnOfShowmount() throws {
@@ -2425,7 +2425,226 @@ func testUpdateScheduleChecksDaily() throws {
     try expect(UpdateSchedule.checkInterval == 86400, "Update check interval must be one day")
 }
 
+// MARK: - 1.0.3: NFS hard mounts, probe policy, mount point rules
+
+private func nfsVolume(_ options: NFSOptions = NFSOptions(), mountPoint: String = "/Users/andy/Volumes/video") -> VolumeConfig {
+    VolumeConfig(name: "video", protocolType: .nfs, server: "192.168.3.106", remotePath: "/volume1/video", username: nil, mountPoint: mountPoint, checkIntervalSeconds: 300, isEnabled: true, nfsOptions: options)
+}
+
+func testNFSOptionsDefaultToHardV3AndDecodeFromLegacyJSON() throws {
+    try expect(NFSOptions().mode == .hard && NFSOptions().version == .v3, "New NFS volumes are hard + v3")
+    let legacy = """
+    {"id":"11111111-1111-1111-1111-111111111111","name":"v","protocolType":"nfs","server":"s","remotePath":"/a","mountPoint":"/m","checkIntervalSeconds":300,"isEnabled":true}
+    """
+    let decoded = try JSONDecoder().decode(VolumeConfig.self, from: Data(legacy.utf8))
+    try expect(decoded.nfsOptions == NFSOptions(), "Configs saved before 1.0.3 pick up the hard default")
+    let soft = nfsVolume(NFSOptions(mode: .soft, version: .v4_1))
+    let round = try JSONDecoder().decode(VolumeConfig.self, from: JSONEncoder().encode(soft))
+    try expect(round.nfsOptions == NFSOptions(mode: .soft, version: .v4_1), "NFS options round trip")
+}
+
+func testNFSMountPlanFollowsModeAndVersion() throws {
+    func options(_ o: NFSOptions) -> String {
+        (try? MountPlanner().mountPlan(for: nfsVolume(o), password: nil, suppressesUserInterface: true).arguments[1]) ?? "<error>"
+    }
+    let tail = "nolocks,noowners,noatime,rsize=1048576,wsize=1048576"
+    try expect(options(NFSOptions(mode: .soft, version: .v3)) == "vers=3,soft,\(tail)", "soft has no intr")
+    try expect(options(NFSOptions(mode: .hard, version: .v4_1)) == "vers=4.1,hard,intr,\(tail)", "v4.1 is pinned as vers=4.1")
+    try expect(options(NFSOptions(mode: .hard, version: .auto)) == "hard,intr,\(tail)", "auto leaves the version to macOS")
+}
+
+/// Probe stub: returns the scripted outcomes in order, then the last one forever.
+final class ScriptedProbe: PathProbing {
+    var outcomes: [PathProbeOutcome]
+    init(_ outcomes: [PathProbeOutcome]) { self.outcomes = outcomes }
+    func probe(path: String) -> PathProbeOutcome { outcomes.count > 1 ? outcomes.removeFirst() : outcomes[0] }
+}
+
+final class FakeClock {
+    var now = Date(timeIntervalSince1970: 1_000_000)
+    func advance(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+}
+
+private let nfsMountedOutput = "192.168.3.106:/volume1/video on /Users/andy/Volumes/video (nfs, nodev, nosuid, noowners, noatime, mounted by andy)\n"
+
+private func probingState(_ probe: PathProbing, clock: FakeClock) -> FileSystemMountStateProvider {
+    FileSystemMountStateProvider(
+        mountTable: SystemMountTable(mountOutput: nfsMountedOutput),
+        validatesResponsiveness: true,
+        pathProbe: probe,
+        now: { clock.now }
+    )
+}
+
+func testPathHealthProbeDistinguishesTimeoutFromError() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("probe-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try expect(PathHealthProbe(timeout: 2).probe(path: directory.path) == .responsive, "Existing directory is responsive")
+    try expect(PathHealthProbe(timeout: 2).probe(path: directory.appendingPathComponent("gone").path) == .failed, "Missing path fails fast, it is not a timeout")
+}
+
+func testHardNFSMountToleratesBriefProbeTimeouts() throws {
+    let clock = FakeClock()
+    let state = probingState(ScriptedProbe([.timedOut]), clock: clock)
+    let nfs = nfsVolume()
+    // A router reboot: the hard mount is blocking, not broken. Many checks in the same minute must not
+    // tear it down — and the *number* of checks must not matter, only how long it has been silent.
+    for _ in 0..<5 {
+        let status = state.mountStatus(config: nfs)
+        try expect(status.isMounted && !status.isStale, "A first timeout on a hard NFS mount is only observed")
+    }
+    clock.advance(NFSHealthPolicy.hardTimeoutGrace + 1)
+    let status = state.mountStatus(config: nfs)
+    try expect(!status.isMounted && status.isStale, "Still silent after the grace period: the mount is declared stale")
+}
+
+func testHardNFSTimeoutGraceResetsAfterASuccessfulProbe() throws {
+    let clock = FakeClock()
+    let probe = ScriptedProbe([.timedOut, .responsive, .timedOut])
+    let state = probingState(probe, clock: clock)
+    let nfs = nfsVolume()
+    _ = state.mountStatus(config: nfs)                       // timedOut, window opens
+    clock.advance(NFSHealthPolicy.hardTimeoutGrace - 5)
+    _ = state.mountStatus(config: nfs)                       // responsive, window closes
+    clock.advance(10)
+    let status = state.mountStatus(config: nfs)              // timedOut again: a NEW window
+    try expect(status.isMounted, "A recovered mount starts a fresh grace window")
+}
+
+func testHardNFSProbeErrorIsStaleImmediately() throws {
+    let clock = FakeClock()
+    let status = probingState(ScriptedProbe([.failed]), clock: clock).mountStatus(config: nfsVolume())
+    try expect(!status.isMounted && status.isStale, "ESTALE-style errors are not worth waiting for")
+}
+
+func testSoftNFSAndOtherProtocolsKeepImmediateTimeoutStale() throws {
+    let clock = FakeClock()
+    let soft = probingState(ScriptedProbe([.timedOut]), clock: clock).mountStatus(config: nfsVolume(NFSOptions(mode: .soft)))
+    try expect(!soft.isMounted && soft.isStale, "A timeout on a soft mount is stale at once, as before")
+}
+
+func testReconnectKeepsAResponsiveHardNFSMount() throws {
+    let runner = RecordingCommandRunner()
+    let engine = AgentEngine(mountState: FakeMountStateProvider(isMounted: true), credentialStore: InMemoryCredentialStore(), commandRunner: runner, mountPlanner: MountPlanner())
+    let status = try engine.reconnect(nfsVolume())
+    try expect(status == .mounted, "A hard NFS mount that still answers needs no reconnect")
+    try expect(runner.plans.isEmpty, "Network recovery must not unmount a hard mount that resumes on its own; ran \(runner.plans.map(\.executable))")
+}
+
+func testReconnectStillRebuildsSoftNFSAndStaleHardMounts() throws {
+    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("reconnect-\(UUID().uuidString)/video").path
+    defer { try? FileManager.default.removeItem(atPath: (scratch as NSString).deletingLastPathComponent) }
+    let soft = RecordingCommandRunner()
+    _ = try AgentEngine(mountState: FakeMountStateProvider(isMounted: true), credentialStore: InMemoryCredentialStore(), commandRunner: soft, mountPlanner: MountPlanner()).reconnect(nfsVolume(NFSOptions(mode: .soft), mountPoint: scratch))
+    try expect(soft.plans.first?.executable == "/usr/sbin/diskutil", "Soft mounts are still rebuilt after an outage")
+    let stale = RecordingCommandRunner()
+    _ = try AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: InMemoryCredentialStore(), commandRunner: stale, mountPlanner: MountPlanner()).reconnect(nfsVolume(mountPoint: scratch))
+    try expect(stale.plans.contains { $0.executable == "/sbin/umount" }, "A hard mount that is not healthy is cleared and remounted")
+}
+
+func testProcessCommandRunnerTimeoutKillsAHungCommand() throws {
+    let started = Date()
+    let result = try ProcessCommandRunner(timeout: 1).run(CommandPlan(executable: "/bin/sleep", arguments: ["30"]))
+    try expect(Date().timeIntervalSince(started) < 5, "A hung command must be killed at the timeout")
+    try expect(result.exitCode == ProcessCommandRunner.timedOutExitCode && result.stderr.contains("timed out"), "Timeout is reported, got \(result)")
+    let quick = try ProcessCommandRunner(timeout: 5).run(CommandPlan(executable: "/bin/echo", arguments: ["hi"]))
+    try expect(quick.exitCode == 0 && quick.stdout == "hi\n", "Fast commands are unaffected")
+}
+
+func testInteractiveAndQuietNFSMountPlansAreIdentical() throws {
+    for options in [NFSOptions(), NFSOptions(mode: .soft, version: .auto), NFSOptions(mode: .hard, version: .v4_1)] {
+        let nfs = nfsVolume(options)
+        let quiet = try MountPlanner().mountPlan(for: nfs, password: nil, suppressesUserInterface: true)
+        let interactive = try MountPlanner().mountPlan(for: nfs, password: nil, suppressesUserInterface: false)
+        try expect(quiet == interactive, "The user-initiated mount must carry the same hard/intr/version options; got \(interactive.arguments)")
+    }
+}
+
+func testHardNFSGraceStartsFreshAfterBeingDeclaredStale() throws {
+    let clock = FakeClock()
+    let state = probingState(ScriptedProbe([.timedOut]), clock: clock)
+    let nfs = nfsVolume()
+    _ = state.mountStatus(config: nfs)
+    clock.advance(NFSHealthPolicy.hardTimeoutGrace + 1)
+    try expect(state.mountStatus(config: nfs).isStale, "Declared stale after the grace period")
+    // The remounted volume answers slowly once: that must not be held against it with the old timestamp.
+    try expect(state.mountStatus(config: nfs).isMounted, "After a stale verdict the next timeout opens a new window")
+}
+
+func testMountPointRulesRejectUnstableLocations() throws {
+    try expect(MountPointRules.issue(for: "~/mnt/video", homeDirectory: "/Users/andy", mountedPaths: []) == .notAbsolute, "A literal ~ path is not absolute")
+    try expect(MountPointRules.issue(for: "mnt/video", homeDirectory: "/Users/andy", mountedPaths: []) == .notAbsolute, "Relative paths are rejected")
+    let home = "/Users/andy"
+    func issue(_ path: String, mounts: [String] = []) -> MountPointIssue? {
+        MountPointRules.issue(for: path, homeDirectory: home, mountedPaths: mounts)
+    }
+    try expect(issue("/Users/andy/Volumes/video") == nil, "~/Volumes is fine")
+    try expect(issue("/Users/andy/mnt/video") == nil, "~/mnt is equally fine")
+    try expect(issue("/Volumes/video") == .systemVolumes, "/Volumes is managed by the system")
+    try expect(issue("/Volumes") == .systemVolumes, "/Volumes itself too")
+    try expect(issue("/Users/andy/Documents/nas") == .protectedFolder, "Documents is privacy-protected")
+    try expect(issue("/Users/andy/Desktop/nas") == .protectedFolder, "Desktop is privacy-protected")
+    try expect(issue("/Users/andy/Downloads/nas") == .protectedFolder, "Downloads is privacy-protected")
+    try expect(issue("/Users/andy/Library/Mobile Documents/com~apple~CloudDocs/nas") == .protectedFolder, "iCloud Drive syncs and is protected")
+    try expect(issue("/Users/andy/Volumes/video/inner", mounts: ["/Users/andy/Volumes/video"]) == .insideMount, "Inside another mount")
+    try expect(issue("/Users/andy/Volumes/video", mounts: ["/Users/andy/Volumes/video"]) == nil, "The volume's own mount point is not 'inside' itself")
+    try expect(issue("/Users/andy/Volumes/videoextra", mounts: ["/Users/andy/Volumes/video"]) == nil, "A sibling with a shared prefix is not inside")
+    try expect(issue("/Users/andy/Documentsish/x") == nil, "Prefix match must be on path components")
+}
+
+func testStaleOwnNFSMountIsForceUnmountedBeforeAnythingTouchesThePath() throws {
+    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("stale-\(UUID().uuidString)/video").path
+    defer { try? FileManager.default.removeItem(atPath: (scratch as NSString).deletingLastPathComponent) }
+    let nfs = nfsVolume(mountPoint: scratch)
+    let table = SystemMountTable(mountOutput: "192.168.3.106:/volume1/video on \(scratch) (nfs, nodev, nosuid, mounted by andy)\n")
+    let runner = RecordingCommandRunner()
+    let engine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: InMemoryCredentialStore(), commandRunner: runner, mountPlanner: MountPlanner(), mountTable: table)
+    let status = try engine.check(nfs)
+    try expect(status == .mounted, "After clearing the dead mount the share is mounted again, got \(status)")
+    try expect(runner.plans.map(\.executable) == ["/sbin/umount", "/sbin/mount_nfs"], "A dead NFS mount of this share is force-unmounted first; ran \(runner.plans.map(\.executable))")
+    try expect(runner.plans.first?.arguments == ["-f", scratch], "umount -f targets the volume's own mount point")
+}
+
+func testStaleNFSMountThatCannotBeClearedIsReportedNotTouched() throws {
+    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("stuck-\(UUID().uuidString)/video").path
+    defer { try? FileManager.default.removeItem(atPath: (scratch as NSString).deletingLastPathComponent) }
+    let table = SystemMountTable(mountOutput: "192.168.3.106:/volume1/video on \(scratch) (nfs, nodev, nosuid, mounted by andy)\n")
+    let runner = RecordingCommandRunner(result: CommandResult(exitCode: 1, stdout: "", stderr: "umount: busy"))
+    let engine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: InMemoryCredentialStore(), commandRunner: runner, mountPlanner: MountPlanner(), mountTable: table)
+    let status = try engine.check(nfsVolume(mountPoint: scratch))
+    if case .failed = status {} else { throw ManualTestFailure.failed("Expected a failure when the dead mount cannot be removed, got \(status)") }
+    try expect(!runner.plans.contains { $0.executable == "/sbin/mount_nfs" }, "Do not mount on top of a mount that could not be cleared")
+    try expect(!FileManager.default.fileExists(atPath: (scratch as NSString).deletingLastPathComponent), "The path of a possibly hung mount is not touched")
+}
+
+func testForeignMountAtTheNFSMountPointIsNotForceUnmounted() throws {
+    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("foreign-\(UUID().uuidString)/video").path
+    defer { try? FileManager.default.removeItem(atPath: (scratch as NSString).deletingLastPathComponent) }
+    let table = SystemMountTable(mountOutput: "//u@192.168.3.106/video on \(scratch) (smbfs, nodev, nosuid, mounted by andy)\n")
+    let runner = RecordingCommandRunner()
+    let engine = AgentEngine(mountState: FakeMountStateProvider(isMounted: false), credentialStore: InMemoryCredentialStore(), commandRunner: runner, mountPlanner: MountPlanner(), mountTable: table)
+    _ = try engine.check(nfsVolume(mountPoint: scratch))
+    try expect(!runner.plans.contains { $0.executable == "/sbin/umount" }, "Only this volume's own dead mount is cleared up front")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Interactive and quiet NFS plans are identical", testInteractiveAndQuietNFSMountPlansAreIdentical),
+    ("Hard NFS grace starts fresh after stale verdict", testHardNFSGraceStartsFreshAfterBeingDeclaredStale),
+    ("Stale own NFS mount is force-unmounted first", testStaleOwnNFSMountIsForceUnmountedBeforeAnythingTouchesThePath),
+    ("Uncleared stale NFS mount is reported, not touched", testStaleNFSMountThatCannotBeClearedIsReportedNotTouched),
+    ("Foreign mount at NFS mount point is not force-unmounted", testForeignMountAtTheNFSMountPointIsNotForceUnmounted),
+    ("NFS options default to hard v3 and decode legacy JSON", testNFSOptionsDefaultToHardV3AndDecodeFromLegacyJSON),
+    ("NFS mount plan follows mode and version", testNFSMountPlanFollowsModeAndVersion),
+    ("PathHealthProbe distinguishes timeout from error", testPathHealthProbeDistinguishesTimeoutFromError),
+    ("Hard NFS tolerates brief probe timeouts", testHardNFSMountToleratesBriefProbeTimeouts),
+    ("Hard NFS timeout grace resets after success", testHardNFSTimeoutGraceResetsAfterASuccessfulProbe),
+    ("Hard NFS probe error is stale immediately", testHardNFSProbeErrorIsStaleImmediately),
+    ("Soft NFS keeps immediate timeout stale", testSoftNFSAndOtherProtocolsKeepImmediateTimeoutStale),
+    ("Reconnect keeps a responsive hard NFS mount", testReconnectKeepsAResponsiveHardNFSMount),
+    ("Reconnect rebuilds soft and stale hard mounts", testReconnectStillRebuildsSoftNFSAndStaleHardMounts),
+    ("ProcessCommandRunner timeout kills hung command", testProcessCommandRunnerTimeoutKillsAHungCommand),
+    ("MountPointRules reject unstable locations", testMountPointRulesRejectUnstableLocations),
     ("VolumeConfig JSON round trip", testVolumeConfigRoundTripsThroughJSON),
     ("ConfigStore save/load", testConfigStoreSaveLoadAndMissingFile),
     ("InMemoryCredentialStore", testInMemoryCredentialStore),

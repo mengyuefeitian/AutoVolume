@@ -63,6 +63,9 @@ public final class AppViewModel {
     private let ntfsMountedVolumesStore = NTFSMountedVolumesStore()
     private let fullDiskAccessChecker: FullDiskAccessChecker
     private let nfsExportLister: NFSExportListing
+    /// Unmounting never prompts, so it can be bounded: with a hard NFS mount and the NAS away, an
+    /// unbounded `diskutil unmount` would hang the Unmount button forever.
+    private let unmountRunner: CommandRunner
 
     public init(
         configStore: ConfigStore = JSONConfigStore(),
@@ -76,7 +79,8 @@ public final class AppViewModel {
         mountExposure: MountExposure = MountExposure(),
         settingsStore: AppSettingsStore = JSONAppSettingsStore(),
         fullDiskAccessChecker: FullDiskAccessChecker = FullDiskAccessChecker(),
-        nfsExportLister: NFSExportListing = ShowmountExportLister()
+        nfsExportLister: NFSExportListing = ShowmountExportLister(),
+        unmountRunner: CommandRunner = ProcessCommandRunner(timeout: 30)
     ) {
         self.configStore = configStore
         self.credentialStore = credentialStore
@@ -90,6 +94,7 @@ public final class AppViewModel {
         self.settingsStore = settingsStore
         self.fullDiskAccessChecker = fullDiskAccessChecker
         self.nfsExportLister = nfsExportLister
+        self.unmountRunner = unmountRunner
         self.volumes = (try? configStore.load()) ?? []
         self.alerts = (try? alertStore.load()) ?? []
         self.settings = (try? settingsStore.load()) ?? AppSettings()
@@ -394,9 +399,9 @@ public final class AppViewModel {
         DiagnosticsContext.shared.begin(operationName)
         defer { DiagnosticsContext.shared.end() }
         let mountPoint = mountPlanner.unmountTarget(for: config)
-        let result = try commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+        let result = try unmountRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         guard result.exitCode == 0 else {
-            let forceResult = try commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+            let forceResult = try unmountRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
             if forceResult.exitCode != 0 {
                 AutoVolumeLogger.shared.warning("Unmount failed for \(config.name): \(commandFailureMessage(forceResult, fallbackKey: .errorCommandUnmountFailed))")
                 throw AppViewModelError.commandFailed(commandFailureMessage(forceResult, fallbackKey: .errorCommandUnmountFailed))
@@ -617,12 +622,13 @@ public final class AppViewModel {
             mountPoint: testMountPoint,
             checkIntervalSeconds: config.checkIntervalSeconds,
             isEnabled: config.isEnabled,
-            smbOptions: config.smbOptions
+            smbOptions: config.smbOptions,
+            nfsOptions: config.nfsOptions
         )
         defer {
             let mountPoint = mountPlanner.effectiveMountPoint(for: testConfig)
-            _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
-            _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+            _ = try? unmountRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+            _ = try? unmountRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
             try? FileManager.default.removeItem(at: testRoot)
         }
 
@@ -713,8 +719,8 @@ public final class AppViewModel {
 
     private func unmountStaleTarget(for config: VolumeConfig) {
         let mountPoint = mountPlanner.unmountTarget(for: config)
-        _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
-        _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+        _ = try? unmountRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
+        _ = try? unmountRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
     }
 
     private func isOccupiedMountPointError(_ result: CommandResult) -> Bool {
@@ -744,6 +750,39 @@ public final class AppViewModel {
             return nil
         }
         return L10n.t(diagnosis.key, args: diagnosis.args)
+    }
+
+    /// Why `config`'s mount point is a poor choice, as a message for the user; `nil` when it is fine.
+    /// A mount point that was already saved is left alone: it may have worked for a long time, and the
+    /// user should not be blocked from editing something else about the volume.
+    public func mountPointProblem(for config: VolumeConfig, previousMountPoint: String?) async -> String? {
+        // WebDAV mount points are chosen by the system, so the configured one is not used.
+        guard config.protocolType != .webdav else { return nil }
+        if let previousMountPoint, SystemMountTable.samePath(previousMountPoint, config.mountPoint) { return nil }
+        return await Task.detached { [self] in mountPointProblemSync(for: config) }.value
+    }
+
+    nonisolated private func mountPointProblemSync(for config: VolumeConfig) -> String? {
+        let mounted = SystemMountTable().snapshot().allMountPoints()
+        guard let issue = MountPointRules.issue(
+            for: config.mountPoint,
+            homeDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+            mountedPaths: mounted
+        ) else { return nil }
+        let suggestion = Self.defaultMountPoint(for: config.name)
+        let name = URL(fileURLWithPath: suggestion).lastPathComponent
+        switch issue {
+        case .systemVolumes: return L10n.t(.editorMountPointIssueSystemVolumes, name)
+        case .protectedFolder: return L10n.t(.editorMountPointIssueProtectedFolder, name)
+        case .insideMount: return L10n.t(.editorMountPointIssueInsideMount)
+        case .notAbsolute: return L10n.t(.editorMountPointIssueNotAbsolute)
+        }
+    }
+
+    /// The server's exported paths for the editor's picker; `nil` when they cannot be listed.
+    public func listNFSExports(server: String) async -> [String]? {
+        let lister = nfsExportLister
+        return await Task.detached { NFSExportResolver.exports(forServer: server, lister: lister) }.value
     }
 
     /// If `config` is an NFS volume whose path is not exported as typed but matches exactly one export

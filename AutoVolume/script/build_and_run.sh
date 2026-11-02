@@ -129,6 +129,7 @@ swiftc \
   Sources/AutoVolumeShared/UpdateSchedule.swift \
   Sources/AutoVolumeShared/NetworkPathFilter.swift \
   Sources/AutoVolumeShared/StatusTransitionTracker.swift \
+  Sources/AutoVolumeShared/MountPointRules.swift \
   Sources/AutoVolumeShared/NFSExports.swift
 
 swiftc \

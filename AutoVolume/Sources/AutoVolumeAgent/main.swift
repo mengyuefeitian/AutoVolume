@@ -9,7 +9,9 @@ let sessionFilePath = parsedSessionFilePath(arguments: CommandLine.arguments)
 let launchAgentLabel = "com.autovolume.agent"
 let store = JSONConfigStore()
 let credentialStore = EncryptedFileCredentialStore()
-let commandRunner = ProcessCommandRunner()
+// Bounded: a mount/umount against a hard NFS mount whose server is away can block forever, and the
+// agent checks every volume from one loop, so one hung command would freeze them all.
+let commandRunner = ProcessCommandRunner(timeout: 90)
 let connectivityTester = ConnectivityTester()
 let mountStateProvider = FileSystemMountStateProvider(healthCheckTimeout: 3, validatesResponsiveness: true)
 let engine = AgentEngine(

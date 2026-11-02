@@ -114,6 +114,17 @@ SMB 默认使用 SMB2–SMB3 自动协商（不启用不安全的 SMB1），并�
 </details>
 
 <details>
+<summary><b>NFS 选「稳定（hard）」还是「快速失败（soft）」？需要密码吗？</b></summary>
+
+- **不需要密码**：NFSv3 没有密码，NAS 按这台 Mac 的 IP 判断，所以编辑器里 NFS 不显示账号密码。
+- **稳定（hard，默认）**：网络中断时保持挂载，NAS 恢复后自动续上；NAS 离线期间访问该文件夹的程序（包括访达）会暂时卡住。适合长期挂载的媒体库（Jellyfin、Plex）。
+- **快速失败（soft）**：很快放弃，但会留下失效的挂载，需要重新挂载。
+- **版本**：默认 NFSv3；NFSv4.1 需要 NAS 端也配置好；「自动」交给 macOS 选择。
+- 挂载位置可以是自己目录下的任何文件夹（`~/Volumes/x`、`~/mnt/x` 效果一样）。编辑器会拒绝 `/Volumes`、桌面/文档/下载/iCloud 云盘，以及位于另一个挂载内部的文件夹。
+
+</details>
+
+<details>
 <summary><b>出问题了怎么反馈？</b></summary>
 
 右键菜单栏图标 →「导出诊断信息…」，桌面会生成一个 zip 压缩包。请在 [Issues](https://github.com/mengyuefeitian/AutoVolume/issues) 里描述问题并附上这个压缩包。压缩包里**不包含任何密码**，账号名也会被隐去。

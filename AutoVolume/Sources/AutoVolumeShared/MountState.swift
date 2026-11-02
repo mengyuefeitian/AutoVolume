@@ -11,6 +11,13 @@ public final class FileSystemMountStateProvider: MountStateProvider {
     private let mountTable: SystemMountTable?
     private let healthCheckTimeout: TimeInterval
     private let validatesResponsiveness: Bool
+    private let pathProbe: PathProbing?
+    private let now: () -> Date
+    /// When each hard NFS mount first stopped answering, until it answers again. Keyed by mount point and
+    /// measured in time rather than in checks: the agent asks several times per cycle, and "how many
+    /// times did we ask" would then decide when a mount is declared dead.
+    private var silentSince: [String: Date] = [:]
+    private let silentSinceLock = NSLock()
 
     /// `mountTable` is injectable for tests; production passes `nil` and every check reads the live
     /// `mount` output exactly once.
@@ -19,8 +26,12 @@ public final class FileSystemMountStateProvider: MountStateProvider {
         mountPlanner: MountPlanner = MountPlanner(),
         mountTable: SystemMountTable? = nil,
         healthCheckTimeout: TimeInterval = 5,
-        validatesResponsiveness: Bool = true
+        validatesResponsiveness: Bool = true,
+        pathProbe: PathProbing? = nil,
+        now: @escaping () -> Date = Date.init
     ) {
+        self.pathProbe = pathProbe
+        self.now = now
         self.fileManager = fileManager
         self.mountPlanner = mountPlanner
         self.mountTable = mountTable
@@ -53,13 +64,49 @@ public final class FileSystemMountStateProvider: MountStateProvider {
             live = candidates.first
         }
         guard let live else {
+            if let expectedMountPoint { forgetSilence(at: expectedMountPoint) }
             return MountStatus(isMounted: false, entry: nil, foundElsewhere: candidates.first)
         }
         let healthPath = mountPlanner.exposedPathTarget(for: config) ?? live.mountPoint
-        guard !validatesResponsiveness || PathHealthProbe(timeout: healthCheckTimeout).isResponsive(path: healthPath) else {
+        guard validatesResponsiveness else {
+            return MountStatus(isMounted: true, entry: live, foundElsewhere: nil)
+        }
+        let outcome = (pathProbe ?? PathHealthProbe(timeout: healthCheckTimeout)).probe(path: healthPath)
+        guard isHealthy(outcome, mountPoint: live.mountPoint, config: config) else {
             return MountStatus(isMounted: false, entry: live, foundElsewhere: nil, isStale: true)
         }
         return MountStatus(isMounted: true, entry: live, foundElsewhere: nil)
+    }
+
+    private func forgetSilence(at mountPoint: String) {
+        silentSinceLock.lock()
+        silentSince[mountPoint] = nil
+        silentSinceLock.unlock()
+    }
+
+    /// A timeout is a fault everywhere except on a hard NFS mount, where it is how an outage looks and
+    /// the kernel resumes on its own. There it is only a fault once it has lasted `hardTimeoutGrace`.
+    /// An error (ESTALE and the like) is a fault immediately: waiting does not cure it.
+    private func isHealthy(_ outcome: PathProbeOutcome, mountPoint: String, config: VolumeConfig) -> Bool {
+        silentSinceLock.lock()
+        defer { silentSinceLock.unlock() }
+        switch outcome {
+        case .responsive:
+            silentSince[mountPoint] = nil
+            return true
+        case .failed:
+            silentSince[mountPoint] = nil
+            return false
+        case .timedOut:
+            guard config.protocolType == .nfs, config.nfsOptions.mode == .hard else { return false }
+            let start = silentSince[mountPoint] ?? now()
+            silentSince[mountPoint] = start
+            if now().timeIntervalSince(start) <= NFSHealthPolicy.hardTimeoutGrace { return true }
+            // Declared dead. The remount that follows starts a new life, so its first probe must not
+            // inherit this timestamp and get torn down on a single slow answer.
+            silentSince[mountPoint] = nil
+            return false
+        }
     }
 
     private func expectedMountPoint(for config: VolumeConfig) -> String? {
@@ -74,7 +121,7 @@ public final class FileSystemMountStateProvider: MountStateProvider {
             return MountStatus(isMounted: false, entry: nil, foundElsewhere: nil)
         }
         let healthPath = mountPlanner.healthCheckPath(for: config, mountTable: SystemMountTable(mountOutput: ""))
-        let responsive = !validatesResponsiveness || PathHealthProbe(timeout: healthCheckTimeout).isResponsive(path: healthPath)
+        let responsive = !validatesResponsiveness || (pathProbe ?? PathHealthProbe(timeout: healthCheckTimeout)).probe(path: healthPath) == .responsive
         return MountStatus(isMounted: responsive, entry: nil, foundElsewhere: nil, isStale: !responsive)
     }
 }
@@ -98,7 +145,21 @@ public struct MountStatus: Equatable {
     }
 }
 
-public struct PathHealthProbe {
+public enum PathProbeOutcome: Equatable {
+    /// The path answered.
+    case responsive
+    /// The path answered with an error (ESTALE, permission, gone) — quickly, so it is a real fault.
+    case failed
+    /// Nothing came back in time. On a hard NFS mount that is what an outage looks like, and it clears
+    /// by itself; on anything else it means the mount is hung.
+    case timedOut
+}
+
+public protocol PathProbing {
+    func probe(path: String) -> PathProbeOutcome
+}
+
+public struct PathHealthProbe: PathProbing {
     private let timeout: TimeInterval
 
     public init(timeout: TimeInterval = 5) {
@@ -106,35 +167,24 @@ public struct PathHealthProbe {
     }
 
     public func isResponsive(path: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/ls")
-        process.arguments = ["-1", path]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return false
-        }
-
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            group.leave()
-        }
-
-        if group.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            Thread.sleep(forTimeInterval: 0.2)
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-            return false
-        }
-        return process.terminationStatus == 0
+        probe(path: path) == .responsive
     }
+
+    public func probe(path: String) -> PathProbeOutcome {
+        // `ls` always exists; if it somehow cannot start that is a fault, not an outage.
+        guard FileManager.default.isExecutableFile(atPath: "/bin/ls") else { return .failed }
+        guard let result = TimedCommand.run(executable: "/bin/ls", arguments: ["-1", path], timeout: timeout) else {
+            return .timedOut
+        }
+        return result.exitCode == 0 ? .responsive : .failed
+    }
+}
+
+/// How long a hard NFS mount may stay silent before it is declared dead.
+public enum NFSHealthPolicy {
+    /// A router restart or a NAS reboot takes about a minute. Tearing the mount down earlier would turn
+    /// every blip into an outage for whatever is reading from it; a hard mount resumes on its own.
+    public static let hardTimeoutGrace: TimeInterval = 90
 }
 
 /// One line of `mount` output: `<source> on <mountPoint> (<fileSystem>, <options>...)`.
@@ -175,6 +225,11 @@ public struct SystemMountTable {
         let result = runMount()
         guard result.exitCode == 0 else { return SystemMountTable(unavailable: true) }
         return SystemMountTable(mountOutput: result.stdout)
+    }
+
+    /// Every mount point in the table (empty when the table cannot be read).
+    public func allMountPoints() -> [String] {
+        (allEntries() ?? []).map(\.mountPoint)
     }
 
     /// Whether anything at all is mounted at exactly `path`.

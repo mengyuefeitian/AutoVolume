@@ -1,3 +1,16 @@
+# NetDiskMount 1.0.4 Release Notes
+
+NFS volumes now survive network drops.
+
+- **Stable by default.** New NFS volumes mount `hard,intr` with NFSv3: a router restart or NAS reboot no longer leaves a dead mount; it resumes by itself. "Fast fail (soft)" and NFSv4.1 (experimental) are available per volume. Saved NFS volumes switch to it the next time they are mounted (unmount and mount once to apply it now).
+- **No more tearing down a healthy mount.** A silent mount is only declared dead after 90 seconds, and a network change no longer unmounts a hard mount that still answers. Real errors (stale handle) are cleared and re-mounted at once.
+- **No stalls.** The agent's mount/unmount commands now time out, and a dead NFS mount is force-unmounted before anything touches its folder.
+- **Simpler NFS editor.** No account/password fields (NFSv3 has none), a "List exports" picker, and the mount point is checked: `/Volumes`, Desktop/Documents/Downloads/iCloud Drive and folders inside another mount are refused.
+
+Upgrade: in-app update, or the DMG below. If you ran your own mount script or daemon for the same folder, remove it so the two do not compete.
+
+---
+
 # NetDiskMount 1.0.2 Release Notes
 
 Fixes NFS volumes that could not connect.

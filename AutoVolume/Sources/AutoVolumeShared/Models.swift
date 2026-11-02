@@ -20,6 +20,7 @@ public struct VolumeConfig: Codable, Identifiable, Equatable {
     public var checkIntervalSeconds: TimeInterval
     public var isEnabled: Bool
     public var smbOptions: SMBOptions
+    public var nfsOptions: NFSOptions
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -32,6 +33,7 @@ public struct VolumeConfig: Codable, Identifiable, Equatable {
         case checkIntervalSeconds
         case isEnabled
         case smbOptions
+        case nfsOptions
     }
 
     public init(
@@ -44,7 +46,8 @@ public struct VolumeConfig: Codable, Identifiable, Equatable {
         mountPoint: String,
         checkIntervalSeconds: TimeInterval,
         isEnabled: Bool,
-        smbOptions: SMBOptions = SMBOptions()
+        smbOptions: SMBOptions = SMBOptions(),
+        nfsOptions: NFSOptions = NFSOptions()
     ) {
         self.id = id
         self.name = name
@@ -56,6 +59,7 @@ public struct VolumeConfig: Codable, Identifiable, Equatable {
         self.checkIntervalSeconds = checkIntervalSeconds
         self.isEnabled = isEnabled
         self.smbOptions = smbOptions
+        self.nfsOptions = nfsOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -70,6 +74,43 @@ public struct VolumeConfig: Codable, Identifiable, Equatable {
         self.checkIntervalSeconds = try container.decode(TimeInterval.self, forKey: .checkIntervalSeconds)
         self.isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
         self.smbOptions = try container.decodeIfPresent(SMBOptions.self, forKey: .smbOptions) ?? SMBOptions()
+        self.nfsOptions = try container.decodeIfPresent(NFSOptions.self, forKey: .nfsOptions) ?? NFSOptions()
+    }
+}
+
+/// How an NFS volume is kept mounted.
+///
+/// `hard` is the right choice for a share that stays mounted for days: when the network or the NAS
+/// disappears, the kernel keeps retrying and carries on when it returns, with the mount intact. `soft`
+/// gives up after a timeout and leaves a dead mount that only a forced unmount clears — usable for a
+/// quick job, wrong for a library that is scanned around the clock. The cost of `hard` is that anything
+/// touching the mount blocks while the server is away (Finder beachballs); `intr` lets a stuck process be
+/// killed, which the agent's own probes rely on.
+public enum NFSMountMode: String, Codable, CaseIterable, Identifiable {
+    case hard
+    case soft
+
+    public var id: String { rawValue }
+}
+
+/// NFS protocol version. v3 is the default: it is what these NAS boxes were verified with, it is
+/// deterministic, and unlike letting macOS choose it never silently falls back to v2. v4.1 is offered for
+/// servers set up for it; it needs the NAS side configured too, which this app cannot check.
+public enum NFSVersion: String, Codable, CaseIterable, Identifiable {
+    case v3
+    case v4_1
+    case auto
+
+    public var id: String { rawValue }
+}
+
+public struct NFSOptions: Codable, Equatable {
+    public var mode: NFSMountMode
+    public var version: NFSVersion
+
+    public init(mode: NFSMountMode = .hard, version: NFSVersion = .v3) {
+        self.mode = mode
+        self.version = version
     }
 }
 

@@ -36,6 +36,11 @@ public final class AgentEngine {
 
     public func reconnect(_ config: VolumeConfig) throws -> VolumeStatus {
         guard config.isEnabled else { return .unmounted }
+        // Network recovery calls this. A hard NFS mount that still answers resumes by itself when the
+        // network returns — unmounting it first would only cut off whatever is reading from it.
+        if config.protocolType == .nfs, config.nfsOptions.mode == .hard, mountState.isMounted(config: config) {
+            return .mounted
+        }
         let mountPoint = mountPlanner.unmountTarget(for: config)
         _ = try? commandRunner.run(mountPlanner.unmountPlan(mountPoint: mountPoint))
         _ = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
@@ -44,6 +49,7 @@ public final class AgentEngine {
 
     private func mount(_ config: VolumeConfig) throws -> VolumeStatus {
         let password = try credentialStore.password(for: config.id)
+        if let blocked = clearDeadNFSMount(of: config) { return blocked }
         try prepareMountPoint(for: config)
         let result = try runMount(config: config, password: password)
         if result.exitCode == 0 {
@@ -57,6 +63,27 @@ public final class AgentEngine {
             return failedStatus(for: config, stderr: result.stderr)
         }
         return mountCommandFailedStatus(exitCode: result.exitCode)
+    }
+
+    /// This share is in the mount table at its own mount point but did not pass the health check, so the
+    /// mount is dead. A dead NFS mount has to be forced off before anything else touches the path: even
+    /// creating the directory would block on it. Only this volume's own mount (same server and export, at
+    /// its own mount point) is cleared; whatever else sits there is not ours to remove. Returns a failure
+    /// when the mount will not come off, in which case nothing may go near the path.
+    private func clearDeadNFSMount(of config: VolumeConfig) -> VolumeStatus? {
+        guard config.protocolType == .nfs else { return nil }
+        let mountPoint = mountPlanner.effectiveMountPoint(for: config)
+        let table = (mountTable ?? SystemMountTable()).snapshot()
+        guard let own = table.entries(matching: config),
+              own.contains(where: { SystemMountTable.samePath($0.mountPoint, mountPoint) }) else { return nil }
+        let result = try? commandRunner.run(mountPlanner.forceUnmountPlan(mountPoint: mountPoint))
+        guard result?.exitCode == 0 else {
+            return .failed(
+                message: L10n.t(.errorAgentMountUnresponsive, args: [], in: .en),
+                key: L10nKey.errorAgentMountUnresponsive.rawValue
+            )
+        }
+        return nil
     }
 
     /// Raw command stderr, unless it is an NFS failure we can explain. This runs unattended on every

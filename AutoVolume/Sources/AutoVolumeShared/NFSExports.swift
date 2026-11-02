@@ -6,7 +6,7 @@ import Darwin
 public enum TimedCommand {
     /// Collects a pipe's output on its own thread, so a command that writes more than the pipe buffer
     /// (64 KB) is not mistaken for a hang.
-    private final class Collector: @unchecked Sendable {
+    final class Collector: @unchecked Sendable {
         private(set) var data = Data()
         private let finished = DispatchGroup()
 
@@ -176,6 +176,12 @@ public struct ShowmountExportLister: NFSExportListing {
 }
 
 public extension NFSExportResolver {
+    /// The exports of the server the user typed (it may carry a port or brackets). `nil` when unavailable.
+    static func exports(forServer server: String, lister: NFSExportListing = ShowmountExportLister()) -> [String]? {
+        let host = ConnectivityTester().hostOnly(server)
+        return host.isEmpty ? nil : lister.exports(host: host)
+    }
+
     /// Resolves a configured NFS volume against its server's exports. `nil` when the server's export
     /// list is unavailable, in which case the path should be used as typed.
     static func resolution(for config: VolumeConfig, lister: NFSExportListing = ShowmountExportLister()) -> (resolution: NFSExportResolution, exports: [String])? {

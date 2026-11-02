@@ -108,6 +108,17 @@ Writing to NTFS needs a small driver (based on open-source ntfs-3g and FUSE-T, w
 </details>
 
 <details>
+<summary><b>NFS: "Stable (hard)" or "Fast fail (soft)"? Does NFS need a password?</b></summary>
+
+- **No password.** NFSv3 has none: the NAS decides by this Mac's IP address, so the editor shows no account fields for NFS.
+- **Stable (hard, default)** keeps the mount through network drops and resumes by itself when the NAS is back. While the NAS is away, programs touching the folder (Finder included) pause. Pick this for libraries that stay mounted (Jellyfin, Plex).
+- **Fast fail (soft)** gives up quickly but leaves a dead mount that must be re-mounted.
+- **Version**: NFSv3 by default. NFSv4.1 works only if the NAS is set up for it; "Auto" lets macOS choose.
+- The mount point can be any folder in your home folder (`~/Volumes/x`, `~/mnt/x` behave the same). The editor rejects `/Volumes`, Desktop/Documents/Downloads/iCloud Drive and folders inside another mount.
+
+</details>
+
+<details>
 <summary><b>How do I report a problem?</b></summary>
 
 Right-click the menu bar icon → "Export Diagnostics…". A zip appears on your Desktop. Open an [issue](https://github.com/mengyuefeitian/AutoVolume/issues), describe the problem and attach the zip. It **never contains passwords**, and account names are hidden.

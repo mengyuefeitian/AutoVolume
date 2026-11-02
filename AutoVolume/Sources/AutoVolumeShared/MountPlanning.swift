@@ -30,7 +30,9 @@ public struct MountPlanner {
         case .afp:
             return try appleScriptMountPlan(url: urlString(scheme: "afp", config: config, includeUser: false), username: config.username, password: password)
         case .nfs:
-            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
+            // NFS never shows a dialog, so there is nothing to suppress: the interactive and the quiet plan
+            // are the same command, and the chosen mode and version apply either way.
+            return try quietMountPlan(for: config, password: password)
         }
     }
 
@@ -142,12 +144,23 @@ public struct MountPlanner {
                 arguments: ["-s", try urlString(scheme: "afp", config: config, includeUser: true, password: password), config.mountPoint]
             )
         case .nfs:
-            // The options that mounted a Synology by hand (nolocks: no lockd needed on the NAS; noowners:
-            // ignore UID differences; large blocks for throughput). `resvport` is left out on purpose:
-            // mount_nfs only allows it for root, and this runs as the user. The NFS version is not
-            // pinned: the OS default (try 3, then 2) is what these volumes used before.
-            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["-o", "soft,nolocks,noowners,noatime,rsize=1048576,wsize=1048576", "\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
+            return CommandPlan(executable: "/sbin/mount_nfs", arguments: ["-o", nfsMountOptions(config.nfsOptions), "\(hostOnly(config.server)):\(nfsRemotePath(config.remotePath))", config.mountPoint])
         }
+    }
+
+    /// The options that mounted a Synology by hand, plus the chosen mode and version. `nolocks`: no lockd
+    /// needed on the NAS; `noowners`: ignore UID differences; large blocks for throughput. `resvport` is
+    /// left out on purpose: mount_nfs only allows it for root, and this runs as the user.
+    func nfsMountOptions(_ options: NFSOptions) -> String {
+        var parts: [String] = []
+        switch options.version {
+        case .v3: parts.append("vers=3")
+        case .v4_1: parts.append("vers=4.1")
+        case .auto: break
+        }
+        parts.append(options.mode == .hard ? "hard,intr" : "soft")
+        parts.append("nolocks,noowners,noatime,rsize=1048576,wsize=1048576")
+        return parts.joined(separator: ",")
     }
 
     public func unmountPlan(mountPoint: String) -> CommandPlan {

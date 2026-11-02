@@ -18,6 +18,9 @@ struct VolumeEditorView: View {
     @State private var intervalMinutes = 5.0
     @State private var smbDialect = SMBDialect.smb3
     @State private var isSMBMultichannelEnabled = true
+    @State private var nfsMode = NFSMountMode.hard
+    @State private var nfsVersion = NFSVersion.v3
+    @State private var nfsExports: [String] = []
     @State private var smbAsyncDirectoryQueryCount = 10.0
     @State private var message: String?
     @State private var isPasswordVisible = false
@@ -44,6 +47,8 @@ struct VolumeEditorView: View {
         _smbDialect = State(initialValue: volume?.smbOptions.dialect ?? .smb3)
         _isSMBMultichannelEnabled = State(initialValue: volume?.smbOptions.isMultichannelEnabled ?? true)
         _smbAsyncDirectoryQueryCount = State(initialValue: Double(volume?.smbOptions.asyncDirectoryQueryCount ?? 10))
+        _nfsMode = State(initialValue: volume?.nfsOptions.mode ?? .hard)
+        _nfsVersion = State(initialValue: volume?.nfsOptions.version ?? .v3)
     }
 
     var body: some View {
@@ -73,32 +78,55 @@ struct VolumeEditorView: View {
                             Text(L10n.t(.editorRemotePath))
                                 .gridCellAnchor(.topLeading)
                             VStack(alignment: .leading, spacing: 4) {
-                                editorTextField(L10n.t(.editorRemotePath), text: $remotePath)
+                                HStack {
+                                    editorTextField(L10n.t(.editorRemotePath), text: $remotePath)
+                                    if protocolType == .nfs {
+                                        Button(L10n.t(.editorNfsListExports)) {
+                                            Task { await loadNFSExports() }
+                                        }
+                                        .disabled(isWorking || server.trimmingCharacters(in: .whitespaces).isEmpty)
+                                        if !nfsExports.isEmpty {
+                                            Menu {
+                                                ForEach(nfsExports, id: \.self) { path in
+                                                    Button(path) { remotePath = path }
+                                                }
+                                            } label: {
+                                                Image(systemName: "list.bullet")
+                                            }
+                                            .menuStyle(.borderlessButton)
+                                            .fixedSize()
+                                        }
+                                    }
+                                }
                                 Text(L10n.t(protocolType == .nfs ? .editorRemotePathHelpNFS : .editorRemotePathHelp))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        GridRow {
-                            Text(L10n.t(.editorUsername))
-                            editorTextField(L10n.t(.editorUsername), text: $username)
-                        }
-                        GridRow {
-                            Text(L10n.t(.editorPassword))
-                            HStack {
-                                if isPasswordVisible {
-                                    editorTextField(L10n.t(.editorPassword), text: $password)
-                                } else {
-                                    editorTextField(L10n.t(.editorPassword), text: $password, isSecure: true)
+                        // NFSv3 has no passwords: the NAS decides by the Mac's IP address (and the share's
+                        // squash/mapping rules), so there is nothing to fill in.
+                        if protocolType != .nfs {
+                            GridRow {
+                                Text(L10n.t(.editorUsername))
+                                editorTextField(L10n.t(.editorUsername), text: $username)
+                            }
+                            GridRow {
+                                Text(L10n.t(.editorPassword))
+                                HStack {
+                                    if isPasswordVisible {
+                                        editorTextField(L10n.t(.editorPassword), text: $password)
+                                    } else {
+                                        editorTextField(L10n.t(.editorPassword), text: $password, isSecure: true)
+                                    }
+                                    Button {
+                                        isPasswordVisible.toggle()
+                                    } label: {
+                                        Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help(isPasswordVisible ? L10n.t(.editorHidePassword) : L10n.t(.editorShowPassword))
                                 }
-                                Button {
-                                    isPasswordVisible.toggle()
-                                } label: {
-                                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
-                                }
-                                .buttonStyle(.borderless)
-                                .help(isPasswordVisible ? L10n.t(.editorHidePassword) : L10n.t(.editorShowPassword))
                             }
                         }
                         GridRow {
@@ -112,6 +140,36 @@ struct VolumeEditorView: View {
                     }
                     Text(L10n.t(.editorEveryMinutes, String(Int(intervalMinutes))))
                         .foregroundStyle(.secondary)
+
+                    if protocolType == .nfs {
+                        Divider()
+                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                            GridRow {
+                                Text(L10n.t(.editorNfsMode))
+                                Picker(L10n.t(.editorNfsMode), selection: $nfsMode) {
+                                    Text(L10n.t(.editorNfsModeHard)).tag(NFSMountMode.hard)
+                                    Text(L10n.t(.editorNfsModeSoft)).tag(NFSMountMode.soft)
+                                }
+                                .labelsHidden()
+                            }
+                            GridRow {
+                                Text("")
+                                Text(L10n.t(.editorNfsModeHelp))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            GridRow {
+                                Text(L10n.t(.editorNfsVersion))
+                                Picker(L10n.t(.editorNfsVersion), selection: $nfsVersion) {
+                                    Text("NFSv3").tag(NFSVersion.v3)
+                                    Text(L10n.t(.editorNfsVersion41)).tag(NFSVersion.v4_1)
+                                    Text(L10n.t(.editorNfsVersionAuto)).tag(NFSVersion.auto)
+                                }
+                                .labelsHidden()
+                            }
+                        }
+                    }
 
                     if protocolType == .smb {
                         Divider()
@@ -163,7 +221,7 @@ struct VolumeEditorView: View {
                 Spacer()
                 Button(L10n.t(.editorTest)) {
                     Task {
-                        await runAsync(status: L10n.t(.statusTesting), closeOnSuccess: false) {
+                        await runAsync(status: L10n.t(.statusTesting), closeOnSuccess: false, validatesMountPoint: false) {
                             let (config, note) = await configWithResolvedNFSPath()
                             let result = try await viewModel.testConnectionAsync(config, password: password.isEmpty ? nil : password)
                             return joined(note, result)
@@ -204,6 +262,7 @@ struct VolumeEditorView: View {
             .padding(.bottom, 14)
         }
         .padding()
+        .onChange(of: server) { nfsExports = [] }
     }
 
     /// For NFS, replaces a share name with the server's full export path ("video" -> "/volume1/video")
@@ -237,12 +296,13 @@ struct VolumeEditorView: View {
                 dialect: smbDialect,
                 isMultichannelEnabled: isSMBMultichannelEnabled,
                 asyncDirectoryQueryCount: Int(smbAsyncDirectoryQueryCount)
-            )
+            ),
+            nfsOptions: NFSOptions(mode: nfsMode, version: nfsVersion)
         )
     }
 
     private func resolvedMountPoint() -> String {
-        let trimmedMountPoint = mountPoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedMountPoint = (mountPoint.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
         let legacyRoot = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Volumes", isDirectory: true)
             .path
@@ -264,7 +324,21 @@ struct VolumeEditorView: View {
     }
 
     @MainActor
-    private func runAsync(status: String, closeOnSuccess: Bool, operation: @escaping () async throws -> String) async {
+    private func loadNFSExports() async {
+        isWorking = true
+        message = L10n.t(.statusWorking)
+        let exports = await viewModel.listNFSExports(server: server)
+        nfsExports = exports ?? []
+        message = exports == nil || exports?.isEmpty == true ? L10n.t(.editorNfsExportsNone) : nil
+        isWorking = false
+    }
+
+    @MainActor
+    private func runAsync(status: String, closeOnSuccess: Bool, validatesMountPoint: Bool = true, operation: @escaping () async throws -> String) async {
+        if validatesMountPoint, let problem = await viewModel.mountPointProblem(for: makeConfig(), previousMountPoint: volume?.mountPoint) {
+            message = problem
+            return
+        }
         isWorking = true
         message = status
         do {
