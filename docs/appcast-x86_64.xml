@@ -3,6 +3,17 @@
   <channel>
     <title>NetDiskMount Updates (Intel x86_64)</title>
     <item>
+      <title>Version 1.0.7</title>
+      <pubDate>Tue, 03 Nov 2026 11:16:47 +0800</pubDate>
+      <sparkle:version>74</sparkle:version>
+      <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/mengyuefeitian/AutoVolume/releases/download/v1.0.7/NetDiskMount-1.0.7-x86_64.dmg"
+        type="application/octet-stream"
+        sparkle:edSignature="5AokxhO8RcpVWfBKREzzJdKBa0XxgefWhYLcChvc0cj3ITvpAAtLXtcETPauQ/9ah+O8nruew7dxtoLDFNimDg==" length="28495540" />
+    </item>
+    <item>
       <title>Version 1.0.5</title>
       <pubDate>Tue, 03 Nov 2026 09:35:49 +0800</pubDate>
       <sparkle:version>72</sparkle:version>
