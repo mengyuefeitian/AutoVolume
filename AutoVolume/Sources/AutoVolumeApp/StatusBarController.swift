@@ -228,7 +228,15 @@ private final class EditorWindowController: NSObject, NSWindowDelegate {
         .id(viewModel.editorSessionID)
         .frame(width: 560, height: 430 + GlassWindow.titleBarInset)
 
-        let editorWindow = window ?? NSWindow(
+        // Always a fresh window (see SettingsWindowController.show): reusing one across opens degraded
+        // its glass surface over time.
+        if let old = window {
+            old.delegate = nil
+            old.contentView = nil
+            old.close()
+            window = nil
+        }
+        let editorWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 430 + GlassWindow.titleBarInset),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
@@ -292,16 +300,26 @@ private final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     func show(viewModel: AppViewModel, updateService: UpdateService) {
+        // A visible window is just brought forward. Otherwise the previous (hidden) window is discarded
+        // and a brand-new one is built: a long-lived window whose glass content was swapped on every
+        // open ended up in a washed-out grey state with blank controls after running for a while.
+        if let existing = window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        discardWindow()
+
         let root = SettingsView(viewModel: viewModel, updateService: updateService)
-        let settingsWindow = window ?? NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+        let settingsWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420 + GlassWindow.titleBarInset),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: true
         )
-        // Settings is a form/tab surface: a window-wide glass layer washed out its text and controls,
-        // so it keeps the standard window (whose chrome is already system-styled on macOS 26+).
-        settingsWindow.contentViewController = NSHostingController(rootView: root)
+        if !GlassWindow.install(NSHostingView(rootView: root), in: settingsWindow) {
+            settingsWindow.contentViewController = NSHostingController(rootView: root)
+        }
         settingsWindow.delegate = self
         settingsWindow.identifier = NSUserInterfaceItemIdentifier("settings")
         settingsWindow.title = L10n.t(.menuSettings)
@@ -313,6 +331,14 @@ private final class SettingsWindowController: NSObject, NSWindowDelegate {
         settingsWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window = settingsWindow
+    }
+
+    private func discardWindow() {
+        guard let old = window else { return }
+        old.delegate = nil
+        old.contentView = nil
+        old.close()
+        window = nil
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

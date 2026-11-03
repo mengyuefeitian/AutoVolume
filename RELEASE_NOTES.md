@@ -1,3 +1,14 @@
+# NetDiskMount 1.0.9 Release Notes
+
+Glass windows no longer turn grey after running a while.
+
+- **Fix:** the Settings and add/edit windows could end up with a washed-out grey surface and blank controls after the app had been running for a while. Each open now builds a fresh window instead of reusing an old one.
+- **Settings keeps the Liquid Glass look.** 1.0.8 had switched Settings to a plain window as a workaround; 1.0.9 restores the glass.
+
+Upgrade: in-app update, or the DMG below.
+
+---
+
 # NetDiskMount 1.0.8 Release Notes
 
 Settings window is readable again on macOS 26+.

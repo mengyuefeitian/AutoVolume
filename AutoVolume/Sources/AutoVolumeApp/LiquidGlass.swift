@@ -69,7 +69,7 @@ enum GlassWindow {
         window.titlebarAppearsTransparent = true
         window.isOpaque = false
         window.backgroundColor = .clear
-        let glass = (window.contentView as? NSGlassEffectView) ?? NSGlassEffectView()
+        let glass = NSGlassEffectView()
         glass.cornerRadius = 0
         glass.contentView = content
         window.contentView = glass
