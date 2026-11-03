@@ -3,6 +3,17 @@
   <channel>
     <title>NetDiskMount Updates</title>
     <item>
+      <title>Version 1.0.5</title>
+      <pubDate>Tue, 03 Nov 2026 09:35:48 +0800</pubDate>
+      <sparkle:version>72</sparkle:version>
+      <sparkle:shortVersionString>1.0.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/mengyuefeitian/AutoVolume/releases/download/v1.0.5/NetDiskMount-1.0.5-arm64.dmg"
+        type="application/octet-stream"
+        sparkle:edSignature="xxIoWDunQDpWtCmVrh8/xJoxTHZ/TvuQeBZ52kgsMOUmn59qe49imq46u+GWHm4NmWfKuLwwfmZXqB4SDEUIDA==" length="28464104" />
+    </item>
+    <item>
       <title>Version 1.0.4</title>
       <pubDate>Tue, 03 Nov 2026 01:31:34 +0800</pubDate>
       <sparkle:version>71</sparkle:version>
