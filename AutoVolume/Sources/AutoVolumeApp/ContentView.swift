@@ -43,6 +43,7 @@ struct ContentView: View {
                 } label: {
                     Label(L10n.t(.listAdd), systemImage: "plus")
                 }
+                .glassButtonStyle()
                 .keyboardShortcut("n")
             }
 
@@ -71,6 +72,10 @@ struct ContentView: View {
                                     .clipShape(Capsule())
                             }
                             .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .liquidGlassCard()
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                         }
                     }
                 }
@@ -135,6 +140,10 @@ struct ContentView: View {
                         .help(L10n.t(.listRemove))
                     }
                     .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .liquidGlassCard()
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
                 }
                 .scrollContentBackground(.hidden)
@@ -148,7 +157,7 @@ struct ContentView: View {
             }
         }
         .padding(22)
-        .background(.regularMaterial)
+        .legacyMaterialBackground()
         .onAppear {
             viewModel.refreshAlertsOnly()
         }

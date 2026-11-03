@@ -201,6 +201,7 @@ swiftc \
   Sources/AutoVolumeApp/LaunchAgentInstaller.swift \
   Sources/AutoVolumeApp/AppViewModel.swift \
   Sources/AutoVolumeApp/ContentView.swift \
+  Sources/AutoVolumeApp/LiquidGlass.swift \
   Sources/AutoVolumeApp/VolumeEditorView.swift \
   Sources/AutoVolumeApp/SettingsView.swift
 

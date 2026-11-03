@@ -1,3 +1,17 @@
+# NetDiskMount 1.0.7 Release Notes
+
+Liquid Glass on macOS 26+, and a tidier editor.
+
+- **Liquid Glass (macOS 26 and later).** The add/edit window and the Settings window use a glass surface with glass buttons, and the volume list shows each volume as a glass card. Older systems keep the previous look.
+- **Add/edit window opens centered**, above other windows, on the screen of the menu-bar icon you clicked (it can still be moved). Settings opens the same way.
+- **Editor layout fixes (#4).** The "Check interval" label no longer overlaps its slider, and the side margins are wider.
+- **Menu groups (#5).** Settings and Check for Updates are one group; View Logs and Export Diagnostics are another.
+- 1.0.6 was an internal test build and was not published; its changes are included here.
+
+Upgrade: in-app update, or the DMG below.
+
+---
+
 # NetDiskMount 1.0.5 Release Notes
 
 Two update addresses, in priority order.

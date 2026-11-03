@@ -133,13 +133,18 @@ struct VolumeEditorView: View {
                             Text(L10n.t(.editorMountPoint))
                             editorTextField(L10n.t(.editorMountPoint), text: $mountPoint)
                         }
+                        // Label in its own grid column so it can never overlap the slider track.
+                        GridRow {
+                            Text(L10n.t(.editorCheckInterval))
+                            Slider(value: $intervalMinutes, in: 1...60, step: 1)
+                                .accessibilityLabel(L10n.t(.editorCheckInterval))
+                        }
+                        GridRow {
+                            Color.clear.frame(width: 0, height: 0)
+                            Text(L10n.t(.editorEveryMinutes, String(Int(intervalMinutes))))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-
-                    Slider(value: $intervalMinutes, in: 1...60, step: 1) {
-                        Text(L10n.t(.editorCheckInterval))
-                    }
-                    Text(L10n.t(.editorEveryMinutes, String(Int(intervalMinutes))))
-                        .foregroundStyle(.secondary)
 
                     if protocolType == .nfs {
                         Divider()
@@ -195,7 +200,7 @@ struct VolumeEditorView: View {
                         }
                     }
                 }
-                .padding(.trailing, 8)
+                .padding(.trailing, 12)
             }
 
             if let message {
@@ -216,7 +221,7 @@ struct VolumeEditorView: View {
                     AutoVolumeLogger.shared.info("Cancel button selected")
                     onCancel()
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .disabled(isWorking)
                 Spacer()
                 Button(L10n.t(.editorTest)) {
@@ -228,7 +233,7 @@ struct VolumeEditorView: View {
                         }
                     }
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .disabled(isWorking)
                 Button(L10n.t(.editorSave)) {
                     Task {
@@ -239,7 +244,7 @@ struct VolumeEditorView: View {
                         }
                     }
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .disabled(isWorking)
                 Button(L10n.t(.editorSaveAndMount)) {
                     Task {
@@ -254,14 +259,15 @@ struct VolumeEditorView: View {
                         }
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .glassButtonStyle(prominent: true)
                 .keyboardShortcut(.defaultAction)
                 .disabled(isWorking)
             }
             .padding(.top, 8)
             .padding(.bottom, 14)
         }
-        .padding()
+        .padding(.horizontal, 28)
+        .padding(.vertical, 14)
         .onChange(of: server) { nfsExports = [] }
     }
 
@@ -361,9 +367,10 @@ enum EditorInputActivation {
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows
-                .first { $0.identifier?.rawValue == "volume-editor" }?
-                .makeKeyAndOrderFront(nil)
+            guard let editor = NSApp.windows.first(where: { $0.identifier?.rawValue == "volume-editor" }) else { return }
+            // Switching the activation policy can shove the window to the screen's top edge; re-center.
+            WindowPlacement.centerOnActiveScreen(editor)
+            editor.makeKeyAndOrderFront(nil)
         }
     }
 

@@ -99,10 +99,12 @@ final class StatusBarController: NSObject {
 
     private func showContextMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: L10n.t(.menuViewLogs), action: #selector(openLogs), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: L10n.t(.menuExportDiagnostics), action: #selector(exportDiagnostics), keyEquivalent: ""))
+        // Group 1: settings + updates. Group 2: logs + diagnostics. Then quit.
         menu.addItem(NSMenuItem(title: L10n.t(.menuSettings), action: #selector(openSettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: L10n.t(.menuCheckForUpdates), action: #selector(checkForUpdates), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: L10n.t(.menuViewLogs), action: #selector(openLogs), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: L10n.t(.menuExportDiagnostics), action: #selector(exportDiagnostics), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: L10n.t(.menuQuit), action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items {
@@ -224,16 +226,17 @@ private final class EditorWindowController: NSObject, NSWindowDelegate {
             onSaved: { message in AutoVolumeLogger.shared.info("Editor saved: \(message)") }
         )
         .id(viewModel.editorSessionID)
-        .frame(width: 560, height: 430)
+        .frame(width: 560, height: 430 + GlassWindow.titleBarInset)
 
-        let hostingController = NSHostingController(rootView: root)
         let editorWindow = window ?? NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 430 + GlassWindow.titleBarInset),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: true
         )
-        editorWindow.contentViewController = hostingController
+        if !GlassWindow.install(NSHostingView(rootView: root), in: editorWindow) {
+            editorWindow.contentViewController = NSHostingController(rootView: root)
+        }
         editorWindow.delegate = self
         editorWindow.identifier = NSUserInterfaceItemIdentifier("volume-editor")
         editorWindow.title = L10n.t(.appProductName)
@@ -241,7 +244,7 @@ private final class EditorWindowController: NSObject, NSWindowDelegate {
         editorWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
         editorWindow.hidesOnDeactivate = false
         editorWindow.isReleasedWhenClosed = false
-        editorWindow.center()
+        WindowPlacement.centerOnActiveScreen(editorWindow)
         editorWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window = editorWindow
@@ -290,14 +293,15 @@ private final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func show(viewModel: AppViewModel, updateService: UpdateService) {
         let root = SettingsView(viewModel: viewModel, updateService: updateService)
-        let hostingController = NSHostingController(rootView: root)
         let settingsWindow = window ?? NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420 + GlassWindow.titleBarInset),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: true
         )
-        settingsWindow.contentViewController = hostingController
+        if !GlassWindow.install(NSHostingView(rootView: root), in: settingsWindow) {
+            settingsWindow.contentViewController = NSHostingController(rootView: root)
+        }
         settingsWindow.delegate = self
         settingsWindow.identifier = NSUserInterfaceItemIdentifier("settings")
         settingsWindow.title = L10n.t(.menuSettings)
@@ -305,7 +309,7 @@ private final class SettingsWindowController: NSObject, NSWindowDelegate {
         settingsWindow.collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
         settingsWindow.hidesOnDeactivate = false
         settingsWindow.isReleasedWhenClosed = false
-        settingsWindow.center()
+        WindowPlacement.centerOnActiveScreen(settingsWindow)
         settingsWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window = settingsWindow
