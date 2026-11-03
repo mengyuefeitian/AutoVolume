@@ -294,14 +294,14 @@ private final class SettingsWindowController: NSObject, NSWindowDelegate {
     func show(viewModel: AppViewModel, updateService: UpdateService) {
         let root = SettingsView(viewModel: viewModel, updateService: updateService)
         let settingsWindow = window ?? NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420 + GlassWindow.titleBarInset),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: true
         )
-        if !GlassWindow.install(NSHostingView(rootView: root), in: settingsWindow) {
-            settingsWindow.contentViewController = NSHostingController(rootView: root)
-        }
+        // Settings is a form/tab surface: a window-wide glass layer washed out its text and controls,
+        // so it keeps the standard window (whose chrome is already system-styled on macOS 26+).
+        settingsWindow.contentViewController = NSHostingController(rootView: root)
         settingsWindow.delegate = self
         settingsWindow.identifier = NSUserInterfaceItemIdentifier("settings")
         settingsWindow.title = L10n.t(.menuSettings)

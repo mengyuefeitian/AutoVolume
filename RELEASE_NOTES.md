@@ -1,3 +1,13 @@
+# NetDiskMount 1.0.8 Release Notes
+
+Settings window is readable again on macOS 26+.
+
+- **Fix:** the Settings window's full-window glass layer washed out its text and controls (tabs, pickers, switches). Settings now uses the standard window; the add/edit window and the volume list keep their glass look.
+
+Upgrade: in-app update, or the DMG below.
+
+---
+
 # NetDiskMount 1.0.7 Release Notes
 
 Liquid Glass on macOS 26+, and a tidier editor.

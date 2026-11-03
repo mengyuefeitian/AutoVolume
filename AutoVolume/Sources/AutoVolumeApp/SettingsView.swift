@@ -41,7 +41,7 @@ struct SettingsView: View {
             AboutTabView(viewModel: viewModel, updateService: updateService)
                 .tabItem { Text(L10n.t(.settingsTabAbout)) }
         }
-        .frame(width: 480, height: 420 + GlassWindow.titleBarInset)
+        .frame(width: 480, height: 420)
         .onChange(of: logLevel) { _, newValue in
             viewModel.updateSettings(viewModel.settings.updating(logLevel: newValue))
         }
@@ -83,7 +83,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
     }
 
     private var ntfsTab: some View {
@@ -107,7 +106,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
         .task {
             await viewModel.refreshFullDiskAccessStatusAsync()
         }
