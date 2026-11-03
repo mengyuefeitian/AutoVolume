@@ -2420,6 +2420,32 @@ final class SequenceCommandRunner: CommandRunner {
     }
 }
 
+func testUpdateFeedBasesParsing() throws {
+    let text = """
+    # comment
+    https://a.example.com/AutoVolume/   # primary
+    http://insecure.example.com/x
+    https://b.example.com/NetDiskMount
+
+    https://a.example.com/AutoVolume
+    not a url
+    """
+    try expect(UpdateFeeds.parseBases(text) == ["https://a.example.com/AutoVolume", "https://b.example.com/NetDiskMount"],
+               "Feed bases keep order, drop comments/http/duplicates and trailing slashes")
+}
+
+func testUpdateFeedSelection() throws {
+    let a = URL(string: "https://a.example.com/appcast.xml")!
+    let b = URL(string: "https://b.example.com/appcast.xml")!
+    try expect(UpdateFeeds.select(from: [a, b], isServing: { _ in true }) == a, "Primary wins when both are up")
+    try expect(UpdateFeeds.select(from: [a, b], isServing: { $0 == b }) == b, "Secondary used when primary is down")
+    try expect(UpdateFeeds.select(from: [a, b], isServing: { _ in false }) == a, "Primary returned when all are down")
+    try expect(UpdateFeeds.select(from: [], isServing: { _ in true }) == nil, "No feeds yields nil")
+    let info: [String: Any] = [UpdateFeeds.infoPlistKey: ["https://a.example.com/appcast.xml", "http://bad.example.com/x", "https://b.example.com/appcast.xml"]]
+    try expect(UpdateFeeds.urls(fromInfo: info) == [a, b], "Info.plist feed list skips non-https entries")
+    try expect(UpdateFeeds.urls(fromInfo: [:]).isEmpty, "Missing key means no feed list")
+}
+
 func testUpdateScheduleChecksDaily() throws {
     try expect(UpdateSchedule.automaticallyChecks, "Automatic update checks must be on")
     try expect(UpdateSchedule.checkInterval == 86400, "Update check interval must be one day")
@@ -2773,6 +2799,8 @@ let tests: [(String, () throws -> Void)] = [
     ("MainThreadPingPong recovery duration measured from pingSentAt", testMainThreadPingPongRecoveryDurationMeasuredFromPingSentAt),
     ("MainThreadPingPong large tick gap without outstanding ping is not a stall", testMainThreadPingPongLargeTickGapWithoutOutstandingPingIsNotAStall),
     ("UpdateSchedule checks daily", testUpdateScheduleChecksDaily),
+    ("Update feed bases parsing", testUpdateFeedBasesParsing),
+    ("Update feed selection falls back in order", testUpdateFeedSelection),
     ("L10n every key exists in all languages", testL10nEveryKeyExistsInAllLanguages),
     ("L10n placeholders match English", testL10nPlaceholdersMatchEnglish),
     ("ResolvedLanguage.resolve from system codes", testResolvedLanguageFromSystemCodes),

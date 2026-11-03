@@ -1,0 +1,7 @@
+# Update feed base URLs, highest priority first (one per line, https only; "#" starts a comment).
+# script/build_and_run.sh turns each base into <base>/appcast.xml (arm64) or <base>/appcast-x86_64.xml (Intel)
+# and bakes the ordered list into Info.plist (AVUpdateFeedURLs). At runtime the app uses the first one that
+# currently serves a valid appcast and falls back to the next. The first entry also becomes SUFeedURL.
+# Changing this file only affects builds made afterwards; already installed copies keep the list they shipped with.
+https://mengyuefeitian.github.io/AutoVolume
+https://mengyuefeitian.github.io/NetDiskMount

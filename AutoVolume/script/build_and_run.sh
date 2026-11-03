@@ -65,10 +65,17 @@ fi
 # an arm64 build (and vice versa). appcast.xml remains the arm64 feed to keep
 # every pre-existing install upgrading without interruption.
 if [[ "$TARGET_ARCH" == "x86_64" ]]; then
-  SU_FEED_URL="https://mengyuefeitian.github.io/AutoVolume/appcast-x86_64.xml"
+  APPCAST_NAME="appcast-x86_64.xml"
 else
-  SU_FEED_URL="https://mengyuefeitian.github.io/AutoVolume/appcast.xml"
+  APPCAST_NAME="appcast.xml"
 fi
+# Ordered feed bases (priority first) live in Resources/UpdateFeedBases.txt.
+UPDATE_FEED_URLS=()
+while IFS= read -r base; do
+  UPDATE_FEED_URLS+=("$base/$APPCAST_NAME")
+done < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' -e 's#/*$##' "$ROOT/Resources/UpdateFeedBases.txt" | grep -E '^https://' | awk '!seen[$0]++')
+[[ ${#UPDATE_FEED_URLS[@]} -gt 0 ]] || { echo "error: no https feed in Resources/UpdateFeedBases.txt" >&2; exit 1; }
+SU_FEED_URL="${UPDATE_FEED_URLS[0]}"
 
 SPARKLE_XCFW="$ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64"
 if [[ ! -d "$SPARKLE_XCFW/Sparkle.framework" ]]; then
@@ -130,6 +137,7 @@ swiftc \
   Sources/AutoVolumeShared/NetworkPathFilter.swift \
   Sources/AutoVolumeShared/StatusTransitionTracker.swift \
   Sources/AutoVolumeShared/MountPointRules.swift \
+  Sources/AutoVolumeShared/UpdateFeeds.swift \
   Sources/AutoVolumeShared/NFSExports.swift
 
 swiftc \
@@ -205,6 +213,10 @@ cp "$ROOT/Resources/com.autovolume.agent.plist" "$APP/Contents/Resources/com.aut
 cp "$ROOT/Resources/AutoVolume.icns" "$APP/Contents/Resources/AutoVolume.icns"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :SUFeedURL string $SU_FEED_URL" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :AVUpdateFeedURLs array" "$APP/Contents/Info.plist"
+for feed in "${UPDATE_FEED_URLS[@]}"; do
+  /usr/libexec/PlistBuddy -c "Add :AVUpdateFeedURLs: string $feed" "$APP/Contents/Info.plist"
+done
 /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_KEY" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :SUEnableAutomaticChecks bool true" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :SUScheduledCheckInterval integer 86400" "$APP/Contents/Info.plist"

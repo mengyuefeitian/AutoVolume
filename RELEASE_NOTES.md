@@ -1,3 +1,13 @@
+# NetDiskMount 1.0.5 Release Notes
+
+Two update addresses, in priority order.
+
+- **Primary + fallback update feeds.** The app now carries an ordered list of update addresses and, before each check, uses the first one that is actually serving an appcast; if it is down it falls back to the next. The list lives in `AutoVolume/Resources/UpdateFeedBases.txt` (one base URL per line, highest priority first) and is baked into each build. Builds made after you edit that file carry the new list; installed copies keep the list they shipped with.
+
+Upgrade: in-app update, or the DMG below.
+
+---
+
 # NetDiskMount 1.0.4 Release Notes
 
 NFS volumes now survive network drops.
